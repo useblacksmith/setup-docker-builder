@@ -104,12 +104,14 @@ export async function reportMetric(
   try {
     const agentClient = createBlacksmithAgentClient();
     const metric = new Metric({
-      metricType,
-      value: BigInt(value),
+      type: metricType,
+      value: { case: "intValue", value: BigInt(value) },
     });
 
     await agentClient.reportMetric({
-      metrics: [metric],
+      repoName: process.env.GITHUB_REPO_NAME || "",
+      region: process.env.BLACKSMITH_REGION || "eu-central",
+      metric: metric,
     });
   } catch (error) {
     core.debug(`Failed to report metric: ${(error as Error).message}`);

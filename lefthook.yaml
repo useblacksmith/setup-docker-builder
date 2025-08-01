@@ -14,7 +14,7 @@ pre-commit:
       run: pnpm tsc
 
     - name: build action
-      run: pnpm rollup -c
+      run: pnpm run build
 
     - name: check diff
       run: git diff --exit-code dist pnpm-lock.yaml {staged_files}
