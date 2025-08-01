@@ -20,70 +20,76 @@ import * as TOML from '@iarna/toml';
 import { execa } from 'execa';
 
 // State variables needed for setup-docker-builder
-const tmpDir = process.env['STATE_tmpDir'] || '';
-process.env['STATE_inputs'] ? JSON.parse(process.env['STATE_inputs']) : undefined;
+const tmpDir = process.env.STATE_tmpDir || "";
+process.env.STATE_inputs
+    ? JSON.parse(process.env.STATE_inputs)
+    : undefined;
 function setTmpDir(tmpDir) {
-    core.saveState('tmpDir', tmpDir);
+    core.saveState("tmpDir", tmpDir);
 }
 function setInputs(inputs) {
-    core.saveState('inputs', JSON.stringify(inputs));
+    core.saveState("inputs", JSON.stringify(inputs));
 }
 function setExposeId(exposeId) {
-    core.saveState('exposeId', exposeId);
+    core.saveState("exposeId", exposeId);
 }
 function getExposeId() {
-    return core.getState('exposeId');
+    return core.getState("exposeId");
 }
 function setBuildkitdAddr(addr) {
-    core.saveState('buildkitdAddr', addr);
+    core.saveState("buildkitdAddr", addr);
 }
 function setBuilderName(name) {
-    core.saveState('builderName', name);
+    core.saveState("builderName", name);
 }
 
 // Configure base axios instance for Blacksmith API
 const createBlacksmithAPIClient = () => {
-    const apiUrl = process.env.BLACKSMITH_BACKEND_URL || (process.env.BLACKSMITH_ENV?.includes('staging') ? 'https://stagingapi.blacksmith.sh' : 'https://api.blacksmith.sh');
+    const apiUrl = process.env.BLACKSMITH_BACKEND_URL ||
+        (process.env.BLACKSMITH_ENV?.includes("staging")
+            ? "https://stagingapi.blacksmith.sh"
+            : "https://api.blacksmith.sh");
     core.debug(`Using Blacksmith API URL: ${apiUrl}`);
     const client = axios.create({
         baseURL: apiUrl,
         headers: {
             Authorization: `Bearer ${process.env.BLACKSMITH_STICKYDISK_TOKEN}`,
-            'X-Github-Repo-Name': process.env.GITHUB_REPO_NAME || '',
-            'Content-Type': 'application/json'
-        }
+            "X-Github-Repo-Name": process.env.GITHUB_REPO_NAME || "",
+            "Content-Type": "application/json",
+        },
     });
     axiosRetry.default(client, {
         retries: 5,
         retryDelay: axiosRetry.exponentialDelay,
         retryCondition: (error) => {
-            return axiosRetry.isNetworkOrIdempotentRequestError(error) || (error.response?.status ? error.response.status >= 500 : false);
-        }
+            return (axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+                (error.response?.status ? error.response.status >= 500 : false));
+        },
     });
     return client;
 };
 function createBlacksmithAgentClient() {
-    core.info(`Creating Blacksmith agent client with port: ${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || '5557'}`);
+    core.info(`Creating Blacksmith agent client with port: ${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`);
     const transport = createGrpcTransport({
-        baseUrl: `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || '5557'}`,
-        httpVersion: '2'
+        baseUrl: `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`,
+        httpVersion: "2",
     });
     return createClient(StickyDiskService, transport);
 }
 async function reportBuildPushActionFailure(error, event, isWarning) {
     const requestOptions = {
-        stickydisk_key: process.env.GITHUB_REPO_NAME || '',
-        repo_name: process.env.GITHUB_REPO_NAME || '',
-        region: process.env.BLACKSMITH_REGION || 'eu-central',
-        arch: process.env.BLACKSMITH_ENV?.includes('arm') ? 'arm64' : 'amd64',
-        vm_id: process.env.BLACKSMITH_VM_ID || '',
-        petname: process.env.PETNAME || '',
-        message: event ? `${event}: ${error?.message || ''}` : error?.message || '',
-        warning: isWarning || false
+        stickydisk_key: process.env.GITHUB_REPO_NAME || "",
+        repo_name: process.env.GITHUB_REPO_NAME || "",
+        region: process.env.BLACKSMITH_REGION || "eu-central",
+        arch: process.env.BLACKSMITH_ENV?.includes("arm") ? "arm64" : "amd64",
+        vm_id: process.env.BLACKSMITH_VM_ID || "",
+        petname: process.env.PETNAME || "",
+        message: event ? `${event}: ${error?.message || ""}` : error?.message || "",
+        warning: isWarning || false,
     };
     try {
         const client = createBlacksmithAPIClient();
-        const response = await client.post('/stickydisks/report-failed', requestOptions);
+        const response = await client.post("/stickydisks/report-failed", requestOptions);
         return response.data;
     }
     catch (error) {
@@ -95,10 +101,10 @@ async function reportMetric(metricType, value) {
         const agentClient = createBlacksmithAgentClient();
         const metric = new Metric({
             metricType,
-            value: BigInt(value)
+            value: BigInt(value),
         });
         await agentClient.reportMetric({
-            metrics: [metric]
+            metrics: [metric],
         });
     }
     catch (error) {
@@ -110,13 +116,13 @@ async function commitStickyDisk(exposeId) {
         const agentClient = createBlacksmithAgentClient();
         await agentClient.commitStickyDisk({
             exposeId: exposeId,
-            stickyDiskKey: process.env.GITHUB_REPO_NAME || '',
-            vmId: process.env.BLACKSMITH_VM_ID || '',
+            stickyDiskKey: process.env.GITHUB_REPO_NAME || "",
+            vmId: process.env.BLACKSMITH_VM_ID || "",
             shouldCommit: true,
-            repoName: process.env.GITHUB_REPO_NAME || '',
-            stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || ''
+            repoName: process.env.GITHUB_REPO_NAME || "",
+            stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
         });
-        core.info('Successfully committed sticky disk');
+        core.info("Successfully committed sticky disk");
     }
     catch (error) {
         core.warning(`Failed to commit sticky disk: ${error.message}`);
@@ -130,15 +136,15 @@ async function reportBuild(dockerfilePath) {
 }
 
 // Constants for configuration.
-const BUILDKIT_DAEMON_ADDR = 'tcp://127.0.0.1:1234';
-const mountPoint$1 = '/var/lib/buildkit';
+const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
+const mountPoint$1 = "/var/lib/buildkit";
 const execAsync$2 = promisify(exec);
 async function maybeFormatBlockDevice(device) {
     try {
         // Check if device is formatted with ext4
         try {
             const { stdout } = await execAsync$2(`sudo blkid -o value -s TYPE ${device}`);
-            if (stdout.trim() === 'ext4') {
+            if (stdout.trim() === "ext4") {
                 core.debug(`Device ${device} is already formatted with ext4`);
                 try {
                     // Run resize2fs to ensure filesystem uses full block device
@@ -168,7 +174,7 @@ async function maybeFormatBlockDevice(device) {
 }
 async function getNumCPUs() {
     try {
-        const { stdout } = await execAsync$2('sudo nproc');
+        const { stdout } = await execAsync$2("sudo nproc");
         return parseInt(stdout.trim());
     }
     catch (error) {
@@ -178,20 +184,20 @@ async function getNumCPUs() {
 }
 async function writeBuildkitdTomlFile(parallelism, addr) {
     const jsonConfig = {
-        root: '/var/lib/buildkit',
+        root: "/var/lib/buildkit",
         grpc: {
-            address: [addr]
+            address: [addr],
         },
         registry: {
-            'docker.io': {
-                mirrors: ['http://192.168.127.1:5000'],
+            "docker.io": {
+                mirrors: ["http://192.168.127.1:5000"],
                 http: true,
-                insecure: true
+                insecure: true,
             },
-            '192.168.127.1:5000': {
+            "192.168.127.1:5000": {
                 http: true,
-                insecure: true
-            }
+                insecure: true,
+            },
         },
         worker: {
             oci: {
@@ -199,17 +205,17 @@ async function writeBuildkitdTomlFile(parallelism, addr) {
                 // Disable automatic garbage collection, since we will prune manually. Automatic GC
                 // has been seen to negatively affect startup times of the daemon.
                 gc: false,
-                'max-parallelism': parallelism,
-                snapshotter: 'overlayfs'
+                "max-parallelism": parallelism,
+                snapshotter: "overlayfs",
             },
             containerd: {
-                enabled: false
-            }
-        }
+                enabled: false,
+            },
+        },
     };
     const tomlString = TOML.stringify(jsonConfig);
     try {
-        await fs.promises.writeFile('buildkitd.toml', tomlString);
+        await fs.promises.writeFile("buildkitd.toml", tomlString);
         core.debug(`TOML configuration is ${tomlString}`);
     }
     catch (err) {
@@ -221,16 +227,18 @@ async function startBuildkitd(parallelism, addr, setupOnly) {
     try {
         await writeBuildkitdTomlFile(parallelism, addr);
         // Creates a log stream to write buildkitd output to a file.
-        const logStream = fs.createWriteStream('/tmp/buildkitd.log', { flags: 'a' });
+        const logStream = fs.createWriteStream("/tmp/buildkitd.log", {
+            flags: "a",
+        });
         let buildkitd;
         if (!setupOnly) ;
         else {
-            const buildkitdCommand = 'nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &';
+            const buildkitdCommand = "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
             buildkitd = execa(buildkitdCommand, {
-                shell: '/bin/bash',
-                stdio: ['ignore', 'pipe', 'pipe'],
+                shell: "/bin/bash",
+                stdio: ["ignore", "pipe", "pipe"],
                 detached: true,
-                cleanup: false
+                cleanup: false,
             });
         }
         // Pipe stdout and stderr to log file
@@ -240,7 +248,7 @@ async function startBuildkitd(parallelism, addr, setupOnly) {
         if (buildkitd.stderr) {
             buildkitd.stderr.pipe(logStream);
         }
-        buildkitd.on('error', error => {
+        buildkitd.on("error", (error) => {
             throw new Error(`Failed to start buildkitd: ${error.message}`);
         });
         // Wait for buildkitd PID to appear with backoff retry
@@ -249,7 +257,7 @@ async function startBuildkitd(parallelism, addr, setupOnly) {
         const backoff = 300; // 300ms
         while (Date.now() - startTime < timeout) {
             try {
-                const { stdout } = await execAsync$2('pgrep buildkitd');
+                const { stdout } = await execAsync$2("pgrep buildkitd");
                 if (stdout.trim()) {
                     core.info(`buildkitd daemon started successfully with PID ${stdout.trim()}`);
                     return addr;
@@ -257,10 +265,10 @@ async function startBuildkitd(parallelism, addr, setupOnly) {
             }
             catch (error) {
                 // pgrep returns non-zero if process not found, which is expected while waiting
-                await new Promise(resolve => setTimeout(resolve, backoff));
+                await new Promise((resolve) => setTimeout(resolve, backoff));
             }
         }
-        throw new Error('Timed out waiting for buildkitd to start after 10 seconds');
+        throw new Error("Timed out waiting for buildkitd to start after 10 seconds");
     }
     catch (error) {
         core.error(`failed to start buildkitd daemon: ${error.message}`);
@@ -273,49 +281,52 @@ async function getStickyDisk(options) {
     // Test connection using up endpoint
     try {
         await client.up({}, { signal: options?.signal });
-        core.info('Successfully connected to Blacksmith agent');
+        core.info("Successfully connected to Blacksmith agent");
     }
     catch (error) {
         throw new Error(`grpc connection test failed: ${error.message}`);
     }
-    const stickyDiskKey = process.env.GITHUB_REPO_NAME || '';
-    if (stickyDiskKey === '') {
-        throw new Error('GITHUB_REPO_NAME is not set');
+    const stickyDiskKey = process.env.GITHUB_REPO_NAME || "";
+    if (stickyDiskKey === "") {
+        throw new Error("GITHUB_REPO_NAME is not set");
     }
     core.info(`Getting sticky disk for ${stickyDiskKey}`);
     const response = await client.getStickyDisk({
         stickyDiskKey: stickyDiskKey,
-        region: process.env.BLACKSMITH_REGION || 'eu-central',
-        installationModelId: process.env.BLACKSMITH_INSTALLATION_MODEL_ID || '',
-        vmId: process.env.BLACKSMITH_VM_ID || '',
-        stickyDiskType: 'dockerfile',
-        repoName: process.env.GITHUB_REPO_NAME || '',
-        stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || ''
+        region: process.env.BLACKSMITH_REGION || "eu-central",
+        installationModelId: process.env.BLACKSMITH_INSTALLATION_MODEL_ID || "",
+        vmId: process.env.BLACKSMITH_VM_ID || "",
+        stickyDiskType: "dockerfile",
+        repoName: process.env.GITHUB_REPO_NAME || "",
+        stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
     }, {
-        signal: options?.signal
+        signal: options?.signal,
     });
     return {
-        expose_id: response.exposeId || '',
-        device: response.diskIdentifier || ''
+        expose_id: response.exposeId || "",
+        device: response.diskIdentifier || "",
     };
 }
 async function leaveTailnet() {
     try {
         // Check if we're part of a tailnet before trying to leave
         try {
-            const { stdout } = await execAsync$2('sudo tailscale status');
-            if (stdout.trim() !== '') {
-                await execAsync$2('sudo tailscale down');
-                core.debug('Successfully left tailnet.');
+            const { stdout } = await execAsync$2("sudo tailscale status");
+            if (stdout.trim() !== "") {
+                await execAsync$2("sudo tailscale down");
+                core.debug("Successfully left tailnet.");
             }
             else {
-                core.debug('Not part of a tailnet, skipping leave.');
+                core.debug("Not part of a tailnet, skipping leave.");
             }
         }
         catch (error) {
             // Type guard for ExecException which has the code property
-            if (error && typeof error === 'object' && 'code' in error && error.code === 1) {
-                core.debug('Not part of a tailnet, skipping leave.');
+            if (error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === 1) {
+                core.debug("Not part of a tailnet, skipping leave.");
                 return;
             }
             // Any other exit code indicates a real error
@@ -342,7 +353,7 @@ async function startAndConfigureBuildkitd(parallelism, setupOnly, platforms) {
     while (Date.now() - startTimeBuildkitReady < timeoutBuildkitReady) {
         try {
             const { stdout } = await execAsync$2(`sudo buildctl --addr ${addr} debug workers`);
-            const lines = stdout.trim().split('\n');
+            const lines = stdout.trim().split("\n");
             // For multi-platform builds, we need at least 2 workers
             const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
             if (lines.length > requiredWorkers) {
@@ -353,12 +364,12 @@ async function startAndConfigureBuildkitd(parallelism, setupOnly, platforms) {
         catch (error) {
             core.debug(`Error checking buildkit workers: ${error.message}`);
         }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     // Final check after timeout.
     try {
         const { stdout } = await execAsync$2(`sudo buildctl --addr ${addr} debug workers`);
-        const lines = stdout.trim().split('\n');
+        const lines = stdout.trim().split("\n");
         const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
         if (lines.length <= requiredWorkers) {
             throw new Error(`buildkit workers not ready after ${buildkitdTimeoutMs}ms timeout. Found ${lines.length - 1} workers, required ${requiredWorkers}`);
@@ -381,7 +392,7 @@ async function pruneBuildkitCache() {
     try {
         const sevenDaysInHours = 7 * 24;
         await execAsync$2(`sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --keep-duration ${sevenDaysInHours}h --all`);
-        core.debug('Successfully pruned buildkit cache');
+        core.debug("Successfully pruned buildkit cache");
     }
     catch (error) {
         core.warning(`Error pruning buildkit cache: ${error.message}`);
@@ -397,16 +408,20 @@ const stickyDiskTimeoutMs = 45000;
 async function setupStickyDisk(dockerfilePath, setupOnly) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), stickyDiskTimeoutMs);
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+        }, stickyDiskTimeoutMs);
         let buildResponse = null;
-        let exposeId = '';
-        let device = '';
-        const stickyDiskResponse = await getStickyDisk({ signal: controller.signal });
+        let exposeId = "";
+        let device = "";
+        const stickyDiskResponse = await getStickyDisk({
+            signal: controller.signal,
+        });
         exposeId = stickyDiskResponse.expose_id;
         device = stickyDiskResponse.device;
-        if (device === '') {
+        if (device === "") {
             // TODO(adityamaru): Remove this once all of our VM agents are returning the device in the stickydisk response.
-            device = '/dev/vdb';
+            device = "/dev/vdb";
         }
         clearTimeout(timeoutId);
         await maybeFormatBlockDevice(device);
@@ -416,14 +431,14 @@ async function setupStickyDisk(dockerfilePath, setupOnly) {
         await execAsync$2(`sudo mkdir -p ${mountPoint$1}`);
         await execAsync$2(`sudo mount ${device} ${mountPoint$1}`);
         core.debug(`${device} has been mounted to ${mountPoint$1}`);
-        core.info('Successfully obtained sticky disk');
+        core.info("Successfully obtained sticky disk");
         // Check inode usage at mountpoint, and report if over 80%.
         try {
             const { stdout } = await execAsync$2(`df -i ${mountPoint$1} | tail -1 | awk '{print $5}' | sed 's/%//'`);
             const inodePercentage = parseInt(stdout.trim());
             if (!isNaN(inodePercentage) && inodePercentage > 80) {
                 // Report if over 80%
-                await reportBuildPushActionFailure(new Error(`High inode usage (${inodePercentage}%) detected at ${mountPoint$1}`), 'setupStickyDisk', true /* isWarning */);
+                await reportBuildPushActionFailure(new Error(`High inode usage (${inodePercentage}%) detected at ${mountPoint$1}`), "setupStickyDisk", true /* isWarning */);
                 core.warning(`High inode usage (${inodePercentage}%) detected at ${mountPoint$1}`);
             }
         }
@@ -448,21 +463,21 @@ async function shutdownBuildkitd() {
         // Wait for buildkitd to shutdown with backoff retry
         while (Date.now() - startTime < timeout) {
             try {
-                const { stdout } = await execAsync$1('pgrep buildkitd');
+                const { stdout } = await execAsync$1("pgrep buildkitd");
                 core.debug(`buildkitd process still running with PID: ${stdout.trim()}`);
-                await new Promise(resolve => setTimeout(resolve, backoff));
+                await new Promise((resolve) => setTimeout(resolve, backoff));
             }
             catch (error) {
                 if (error.code === 1) {
                     // pgrep returns exit code 1 when no process is found, which means shutdown successful
-                    core.debug('buildkitd successfully shutdown');
+                    core.debug("buildkitd successfully shutdown");
                     return;
                 }
                 // Some other error occurred
                 throw error;
             }
         }
-        throw new Error('Timed out waiting for buildkitd to shutdown after 10 seconds');
+        throw new Error("Timed out waiting for buildkitd to shutdown after 10 seconds");
     }
     catch (error) {
         core.error(`error shutting down buildkitd process: ${error.message}`);
@@ -470,30 +485,31 @@ async function shutdownBuildkitd() {
     }
 }
 
-const DEFAULT_BUILDX_VERSION = 'v0.23.0';
-const mountPoint = '/var/lib/buildkit';
+const DEFAULT_BUILDX_VERSION = "v0.23.0";
+const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
 async function getInputs() {
     return {
-        'buildx-version': core.getInput('buildx-version'),
-        platforms: Util.getInputList('platforms'),
-        nofallback: core.getBooleanInput('nofallback'),
-        'github-token': core.getInput('github-token')
+        "buildx-version": core.getInput("buildx-version"),
+        platforms: Util.getInputList("platforms"),
+        nofallback: core.getBooleanInput("nofallback"),
+        "github-token": core.getInput("github-token"),
     };
 }
 async function retryWithBackoff(operation, maxRetries = 5, initialBackoffMs = 200) {
-    let lastError = new Error('No error occurred');
+    let lastError = new Error("No error occurred");
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             return await operation();
         }
         catch (error) {
             lastError = error;
-            if (error.message?.includes('429') || error.status === 429) {
+            if (error.message?.includes("429") ||
+                error.status === 429) {
                 if (attempt < maxRetries - 1) {
                     const backoffMs = initialBackoffMs * Math.pow(2, attempt);
                     core.info(`Rate limited (429). Retrying in ${backoffMs}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, backoffMs));
+                    await new Promise((resolve) => setTimeout(resolve, backoffMs));
                     continue;
                 }
             }
@@ -507,7 +523,7 @@ async function setupBuildx(version, toolkit) {
     const standalone = await toolkit.buildx.isStandalone();
     if (!(await toolkit.buildx.isAvailable()) || version) {
         await core.group(`Download buildx from GitHub Releases`, async () => {
-            toolPath = await retryWithBackoff(() => toolkit.buildxInstall.download(version || 'latest', true));
+            toolPath = await retryWithBackoff(() => toolkit.buildxInstall.download(version || "latest", true));
         });
     }
     if (toolPath) {
@@ -525,7 +541,7 @@ async function setupBuildx(version, toolkit) {
     });
 }
 function isValidBuildxVersion(version) {
-    return version === 'latest' || /^v\d+\.\d+\.\d+$/.test(version);
+    return version === "latest" || /^v\d+\.\d+\.\d+$/.test(version);
 }
 /**
  * Starts and configures the Blacksmith builder
@@ -535,7 +551,7 @@ async function startBlacksmithBuilder(inputs) {
     try {
         // Setup sticky disk
         const stickyDiskStartTime = Date.now();
-        const stickyDiskSetup = await setupStickyDisk('', true); // setupOnly = true
+        const stickyDiskSetup = await setupStickyDisk("", true); // setupOnly = true
         const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
         await reportMetric(Metric_MetricType.BPA_HOTLOAD_DURATION_MS, stickyDiskDurationMs);
         // Get CPU count for parallelism
@@ -551,13 +567,13 @@ async function startBlacksmithBuilder(inputs) {
         return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
     }
     catch (error) {
-        await reportBuildPushActionFailure(error, 'starting blacksmith builder');
+        await reportBuildPushActionFailure(error, "starting blacksmith builder");
         if (inputs.nofallback) {
             core.warning(`Error during Blacksmith builder setup: ${error.message}. Failing because nofallback is set.`);
             throw error;
         }
         core.warning(`Error during Blacksmith builder setup: ${error.message}. Falling back to local builder.`);
-        return { addr: null, exposeId: '' };
+        return { addr: null, exposeId: "" };
     }
     finally {
         await leaveTailnet();
@@ -591,12 +607,12 @@ async () => {
     });
     // Validate and setup buildx version
     let buildxVersion = DEFAULT_BUILDX_VERSION;
-    if (inputs['buildx-version'] && inputs['buildx-version'].trim() !== '') {
-        if (isValidBuildxVersion(inputs['buildx-version'])) {
-            buildxVersion = inputs['buildx-version'];
+    if (inputs["buildx-version"] && inputs["buildx-version"].trim() !== "") {
+        if (isValidBuildxVersion(inputs["buildx-version"])) {
+            buildxVersion = inputs["buildx-version"];
         }
         else {
-            core.warning(`Invalid buildx-version '${inputs['buildx-version']}'. ` +
+            core.warning(`Invalid buildx-version '${inputs["buildx-version"]}'. ` +
                 `Expected 'latest' or a version in the form v<MAJOR>.<MINOR>.<PATCH>. ` +
                 `Falling back to default ${DEFAULT_BUILDX_VERSION}.`);
         }
@@ -610,7 +626,8 @@ async () => {
         }
     });
     // Start Blacksmith builder
-    let builderInfo = { addr: null};
+    let builderInfo = {
+        addr: null};
     await core.group(`Starting Blacksmith builder`, async () => {
         builderInfo = await startBlacksmithBuilder(inputs);
     });
@@ -621,27 +638,29 @@ async () => {
             setBuilderName(name);
             // Create the builder
             const createCmd = await toolkit.buildx.getCommand([
-                'create',
-                '--name', name,
-                '--driver', 'remote',
-                builderInfo.addr
+                "create",
+                "--name",
+                name,
+                "--driver",
+                "remote",
+                builderInfo.addr,
             ]);
-            core.info(`Creating builder with command: ${createCmd.command} ${createCmd.args.join(' ')}`);
+            core.info(`Creating builder with command: ${createCmd.command} ${createCmd.args.join(" ")}`);
             await Exec.getExecOutput(createCmd.command, createCmd.args, {
-                ignoreReturnCode: true
-            }).then(res => {
+                ignoreReturnCode: true,
+            }).then((res) => {
                 if (res.stderr.length > 0 && res.exitCode != 0) {
-                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? 'unknown error');
+                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error");
                 }
             });
             // Set as default builder
-            const useCmd = await toolkit.buildx.getCommand(['use', name]);
-            core.info('Setting builder as default');
+            const useCmd = await toolkit.buildx.getCommand(["use", name]);
+            core.info("Setting builder as default");
             await Exec.getExecOutput(useCmd.command, useCmd.args, {
-                ignoreReturnCode: true
-            }).then(res => {
+                ignoreReturnCode: true,
+            }).then((res) => {
                 if (res.stderr.length > 0 && res.exitCode != 0) {
-                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? 'unknown error');
+                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error");
                 }
             });
         });
@@ -649,12 +668,12 @@ async () => {
         await core.group(`Builder info`, async () => {
             const builder = await toolkit.builder.inspect();
             core.info(JSON.stringify(builder, null, 2));
-            core.info('Blacksmith builder is ready for use by Docker');
+            core.info("Blacksmith builder is ready for use by Docker");
         });
     }
     else {
         // Fallback to local builder
-        core.warning('Failed to setup Blacksmith builder, using local builder');
+        core.warning("Failed to setup Blacksmith builder, using local builder");
         await core.group(`Checking for configured builder`, async () => {
             try {
                 const builder = await toolkit.builder.inspect();
@@ -663,10 +682,10 @@ async () => {
                 }
                 else {
                     // Create a local builder
-                    const createLocalBuilderCmd = 'docker buildx create --name local --driver docker-container --use';
+                    const createLocalBuilderCmd = "docker buildx create --name local --driver docker-container --use";
                     try {
                         await Exec.exec(createLocalBuilderCmd);
-                        core.info('Created and set a local builder for use');
+                        core.info("Created and set a local builder for use");
                     }
                     catch (error) {
                         core.setFailed(`Failed to create local builder: ${error.message}`);
@@ -679,9 +698,9 @@ async () => {
         });
     }
     // Create sentinel file to indicate setup is complete
-    const sentinelPath = path.join('/tmp', 'builder-setup-complete');
+    const sentinelPath = path.join("/tmp", "builder-setup-complete");
     try {
-        fs.writeFileSync(sentinelPath, 'Builder setup completed successfully.');
+        fs.writeFileSync(sentinelPath, "Builder setup completed successfully.");
         core.debug(`Created builder setup sentinel file at ${sentinelPath}`);
     }
     catch (error) {
@@ -691,18 +710,18 @@ async () => {
 }, 
 // post action - cleanup
 async () => {
-    await core.group('Cleaning up Docker builder', async () => {
+    await core.group("Cleaning up Docker builder", async () => {
         try {
             await leaveTailnet();
             // Check if buildkitd is running
             try {
-                const { stdout } = await execAsync('pgrep buildkitd');
+                const { stdout } = await execAsync("pgrep buildkitd");
                 if (stdout.trim()) {
                     // Prune cache before shutdown
                     try {
-                        core.info('Pruning BuildKit cache');
+                        core.info("Pruning BuildKit cache");
                         await pruneBuildkitCache();
-                        core.info('BuildKit cache pruned');
+                        core.info("BuildKit cache pruned");
                     }
                     catch (error) {
                         core.warning(`Error pruning BuildKit cache: ${error.message}`);
@@ -712,15 +731,15 @@ async () => {
                     await shutdownBuildkitd();
                     const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
                     await reportMetric(Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS, buildkitdShutdownDurationMs);
-                    core.info('Shutdown buildkitd');
+                    core.info("Shutdown buildkitd");
                 }
                 else {
-                    core.debug('No buildkitd process found running');
+                    core.debug("No buildkitd process found running");
                 }
             }
             catch (error) {
                 if (error.code === 1) {
-                    core.debug('No buildkitd process found running');
+                    core.debug("No buildkitd process found running");
                 }
                 else {
                     core.warning(`Error checking for buildkitd processes: ${error.message}`);
@@ -728,7 +747,7 @@ async () => {
             }
             // Unmount sticky disk
             try {
-                await execAsync('sync');
+                await execAsync("sync");
                 const { stdout: mountOutput } = await execAsync(`mount | grep ${mountPoint}`);
                 if (mountOutput) {
                     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -742,15 +761,15 @@ async () => {
                                 throw error;
                             }
                             core.warning(`Unmount failed, retrying (${attempt}/3)...`);
-                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await new Promise((resolve) => setTimeout(resolve, 100));
                         }
                     }
-                    core.info('Unmounted device');
+                    core.info("Unmounted device");
                 }
             }
             catch (error) {
                 if (error.code === 1) {
-                    core.debug('No dangling mounts found to clean up');
+                    core.debug("No dangling mounts found to clean up");
                 }
                 else {
                     core.warning(`Error during cleanup: ${error.message}`);
@@ -764,16 +783,16 @@ async () => {
             // Commit sticky disk
             const exposeId = getExposeId();
             if (exposeId) {
-                core.info('Committing sticky disk');
+                core.info("Committing sticky disk");
                 await commitStickyDisk(exposeId);
             }
             else {
-                core.warning('Expose ID not found in state, skipping sticky disk commit');
+                core.warning("Expose ID not found in state, skipping sticky disk commit");
             }
         }
         catch (error) {
             core.warning(`Error during Docker builder cleanup: ${error.message}`);
-            await reportBuildPushActionFailure(error, 'docker builder cleanup');
+            await reportBuildPushActionFailure(error, "docker builder cleanup");
         }
     });
 });
