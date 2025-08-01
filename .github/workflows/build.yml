@@ -5,40 +5,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          
+          node-version: "20"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 8
-          
+
       - uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ github.token }}
-          
+
       - name: Configure npm for buf registry
         env:
           BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
         run: |
           npm config set @buf:registry https://buf.build/gen/npm/v1/
           npm config set //buf.build/gen/npm/v1/:_authToken $BUF_TOKEN
-          
+
       - name: Install dependencies
         run: pnpm install
-          
+
       - name: Lint code
         run: |
           pnpm run format
           pnpm run lint || true  # Allow lint failures for now
-          
+
       - name: Build
         run: pnpm run build
-        
+
       - name: Test
         run: pnpm test
-        
+
       - name: Check for uncommitted changes
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
