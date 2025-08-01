@@ -16,15 +16,46 @@ interface StepFailureCheck {
 
 /**
  * Checks GitHub Actions runner logs for failed or cancelled steps
- * @param runnerBasePath - Base path to runner directory (default: current directory)
+ * @param runnerBasePath - Base path to runner directory (default: auto-detect)
  * @returns Promise<StepFailureCheck> - Object containing failure status and details
  */
 export async function checkPreviousStepFailures(
-  runnerBasePath: string = process.cwd(),
+  runnerBasePath?: string,
 ): Promise<StepFailureCheck> {
   try {
+    // If no base path provided, try to detect the runner root
+    if (!runnerBasePath) {
+      // In GitHub Actions, we're typically in /home/runner/_work/{repo}/{repo}
+      // We need to go up to /home/runner to find _diag
+      const cwd = process.cwd();
+      if (cwd.includes("/_work/")) {
+        // Extract the runner root from the path
+        runnerBasePath = cwd.substring(0, cwd.indexOf("/_work/"));
+      } else {
+        // Fallback to checking common locations
+        const possiblePaths = ["/home/runner", process.env.RUNNER_ROOT || ""];
+        for (const path of possiblePaths) {
+          try {
+            await fs.access(path);
+            runnerBasePath = path;
+            break;
+          } catch {
+            // Continue to next path
+          }
+        }
+
+        if (!runnerBasePath) {
+          runnerBasePath = process.cwd();
+        }
+      }
+    }
+
     // Find the Worker log file in _diag directory
     const diagPath = path.join(runnerBasePath, "_diag");
+
+    // Log the detected paths for debugging
+    core.debug(`Detected runner base path: ${runnerBasePath}`);
+    core.debug(`Looking for _diag at: ${diagPath}`);
 
     // Check if _diag directory exists
     try {
@@ -33,7 +64,7 @@ export async function checkPreviousStepFailures(
       return {
         hasFailures: false,
         failedCount: 0,
-        error: "_diag directory not found",
+        error: `_diag directory not found at ${diagPath}`,
       };
     }
 
@@ -143,7 +174,7 @@ export async function checkPreviousStepFailures(
 
 /**
  * Simple boolean check for any failures
- * @param runnerBasePath - Base path to runner directory
+ * @param runnerBasePath - Base path to runner directory (optional, will auto-detect)
  * @returns Promise<boolean> - true if any steps failed or were cancelled
  */
 export async function hasAnyStepFailed(
