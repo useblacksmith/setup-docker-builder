@@ -407,7 +407,7 @@ async function setupStickyDisk() {
         const stickyDiskResponse = await getStickyDisk({
             signal: controller.signal,
         });
-        let exposeId = stickyDiskResponse.expose_id;
+        const exposeId = stickyDiskResponse.expose_id;
         let device = stickyDiskResponse.device;
         if (device === "") {
             // TODO(adityamaru): Remove this once all of our VM agents are returning the device in the stickydisk response.
