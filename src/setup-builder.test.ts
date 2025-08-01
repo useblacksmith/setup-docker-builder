@@ -1,0 +1,123 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as core from "@actions/core";
+import * as setupBuilder from "./setup_builder";
+import * as reporter from "./reporter";
+
+// Mock the modules
+vi.mock("@actions/core", () => ({
+  debug: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+  error: vi.fn(),
+  setFailed: vi.fn(),
+}));
+
+vi.mock("./reporter", () => ({
+  createBlacksmithAgentClient: vi.fn(),
+  reportBuildPushActionFailure: vi.fn(),
+  reportMetric: vi.fn(),
+  commitStickyDisk: vi.fn(),
+  reportBuild: vi.fn(),
+}));
+
+vi.mock("child_process", () => ({
+  exec: vi.fn((cmd, cb) => cb(null, { stdout: "", stderr: "" })),
+  spawn: vi.fn(() => ({
+    on: vi.fn(),
+    stdout: { pipe: vi.fn() },
+    stderr: { pipe: vi.fn() },
+  })),
+}));
+
+vi.mock("fs", () => ({
+  promises: {
+    writeFile: vi.fn(),
+  },
+  createWriteStream: vi.fn(() => ({
+    on: vi.fn(),
+  })),
+}));
+
+describe("setup_builder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Set up default environment variables
+    process.env.GITHUB_REPO_NAME = "test-repo";
+    process.env.BLACKSMITH_REGION = "eu-central";
+    process.env.BLACKSMITH_VM_ID = "test-vm-id";
+  });
+
+  describe("getNumCPUs", () => {
+    it("should return the number of CPUs", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        cb(null, { stdout: "4\n", stderr: "" });
+      });
+
+      const numCPUs = await setupBuilder.getNumCPUs();
+      expect(numCPUs).toBe(4);
+    });
+
+    it("should return 1 if nproc fails", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        cb(new Error("Command failed"), null);
+      });
+
+      const numCPUs = await setupBuilder.getNumCPUs();
+      expect(numCPUs).toBe(1);
+      expect(core.warning).toHaveBeenCalled();
+    });
+  });
+
+  describe("getTailscaleIP", () => {
+    it("should return tailscale IP when available", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        if (cmd.includes("tailscale ip")) {
+          cb(null, { stdout: "100.64.0.1\n", stderr: "" });
+        }
+      });
+
+      const ip = await setupBuilder.getTailscaleIP();
+      expect(ip).toBe("100.64.0.1");
+    });
+
+    it("should return null when tailscale is not available", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        cb(new Error("tailscale not found"), null);
+      });
+
+      const ip = await setupBuilder.getTailscaleIP();
+      expect(ip).toBeNull();
+      expect(core.debug).toHaveBeenCalled();
+    });
+  });
+
+  describe("pruneBuildkitCache", () => {
+    it("should prune buildkit cache successfully", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        if (cmd.includes("buildctl") && cmd.includes("prune")) {
+          cb(null, { stdout: "Cache pruned", stderr: "" });
+        }
+      });
+
+      await setupBuilder.pruneBuildkitCache();
+      expect(core.debug).toHaveBeenCalledWith(
+        "Successfully pruned buildkit cache",
+      );
+    });
+
+    it("should handle prune errors", async () => {
+      const exec = (await import("child_process")).exec as any;
+      exec.mockImplementation((cmd: string, cb: Function) => {
+        cb(new Error("Prune failed"), null);
+      });
+
+      await expect(setupBuilder.pruneBuildkitCache()).rejects.toThrow();
+      expect(core.warning).toHaveBeenCalled();
+    });
+  });
+});

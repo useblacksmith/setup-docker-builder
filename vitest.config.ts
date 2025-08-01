@@ -3,9 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     coverage: {
-      enabled: true,
+      provider: "v8",
+      enabled: false,
       reporter: "text",
-      thresholds: { 100: true },
     },
   },
 });

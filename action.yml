@@ -1,15 +1,25 @@
-# TODO: Modify the following metadata according to the project's specifications.
-
-name: Mkdir Action
-author: Alfi Maulana
-description: Create a new directory
+name: Setup Docker Builder
+author: Blacksmith
+description: Sets up a Docker buildkitd builder with sticky disk cache for improved build performance
 branding:
-  icon: folder-plus
+  icon: layers
   color: black
 inputs:
-  path:
-    description: Path of the directory to create
-    required: true
+  buildx-version:
+    description: Buildx version. (e.g., v0.23.0, latest)
+    required: false
+    default: v0.23.0
+  platforms:
+    description: "List of target platforms for build (e.g., linux/amd64,linux/arm64,linux/arm/v7)"
+    required: false
+  nofallback:
+    description: "If true, fail the action if Blacksmith builder setup fails instead of falling back to local builder"
+    required: false
+    default: "false"
+  github-token:
+    description: "GitHub token for GitHub API access"
+    required: false
 runs:
   using: node20
   main: dist/main.bundle.mjs
+  post: dist/main.bundle.mjs

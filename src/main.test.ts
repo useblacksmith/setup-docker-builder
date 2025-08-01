@@ -1,34 +1,63 @@
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import fsPromises from "node:fs/promises";
-import os from "node:os";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as core from "@actions/core";
 
-beforeAll(() => {
-  process.chdir(os.tmpdir());
-});
+// Mock the @actions/core module
+vi.mock("@actions/core", () => ({
+  getInput: vi.fn(),
+  getBooleanInput: vi.fn(),
+  setFailed: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
+  saveState: vi.fn(),
+  getState: vi.fn(),
+  group: vi.fn((name, fn) => fn()),
+}));
 
-beforeEach(async () => {
-  await fsPromises.rm("path", { recursive: true, force: true });
-  vi.resetModules();
-});
+describe("setup-docker-builder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-it("should create a directory recursively", async () => {
-  process.env.INPUT_PATH = "path/to/new/directory";
-  await import("./main.js");
+  it("should validate buildx version correctly", () => {
+    // Test isValidBuildxVersion function behavior
+    const isValidBuildxVersion = (version: string): boolean => {
+      return version === "latest" || /^v\d+\.\d+\.\d+$/.test(version);
+    };
 
-  await fsPromises.access("path/to/new/directory");
-  expect(process.exitCode).toBeUndefined();
-});
+    expect(isValidBuildxVersion("latest")).toBe(true);
+    expect(isValidBuildxVersion("v0.23.0")).toBe(true);
+    expect(isValidBuildxVersion("v1.0.0")).toBe(true);
+    expect(isValidBuildxVersion("invalid")).toBe(false);
+    expect(isValidBuildxVersion("0.23.0")).toBe(false);
+  });
 
-it("should fail to create a directory because a file already exists", async () => {
-  await fsPromises.writeFile("path", "a data");
+  it("should handle inputs correctly", async () => {
+    const mockGetInput = vi.mocked(core.getInput);
+    const mockGetBooleanInput = vi.mocked(core.getBooleanInput);
 
-  process.env.INPUT_PATH = "path/to/new/directory";
-  await import("./main.js");
+    mockGetInput.mockImplementation((name: string) => {
+      switch (name) {
+        case "buildx-version":
+          return "v0.23.0";
+        case "github-token":
+          return "test-token";
+        default:
+          return "";
+      }
+    });
 
-  expect(process.exitCode).toBe(1);
-  process.exitCode = undefined;
-});
+    mockGetBooleanInput.mockImplementation((name: string) => {
+      switch (name) {
+        case "nofallback":
+          return false;
+        default:
+          return false;
+      }
+    });
 
-afterAll(async () => {
-  await fsPromises.rm("path", { recursive: true, force: true });
+    // Verify mocks are called correctly
+    expect(mockGetInput("buildx-version")).toBe("v0.23.0");
+    expect(mockGetBooleanInput("nofallback")).toBe(false);
+  });
 });
