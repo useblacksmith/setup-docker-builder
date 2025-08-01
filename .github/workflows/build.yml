@@ -26,10 +26,7 @@ jobs:
           npm config set //buf.build/gen/npm/v1/:_authToken $BUF_TOKEN
           
       - name: Install dependencies
-        run: |
-          pnpm install
-          # Update buf packages to latest if BUF_TOKEN is available
-          pnpm add -w @buf/blacksmith_vm-agent.connectrpc_es@latest @buf/blacksmith_vm-agent.bufbuild_es@latest || true
+        run: pnpm install
           
       - name: Lint code
         run: |
