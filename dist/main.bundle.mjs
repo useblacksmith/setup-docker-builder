@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
@@ -478,6 +479,28 @@ async function shutdownBuildkitd() {
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
+/**
+ * Resolve the platform list that should be passed to `docker buildx create`.
+ *
+ * Priority:
+ *   1. Use the user-supplied platforms list (comma-joined) if provided.
+ *   2. Fallback to the architecture of the host runner.
+ */
+function resolveRemoteBuilderPlatforms(platforms) {
+    // If user explicitly provided platforms, honour them verbatim.
+    if (platforms && platforms.length > 0) {
+        return platforms.join(",");
+    }
+    // Otherwise derive from host architecture.
+    const nodeArch = os.arch(); // e.g. 'x64', 'arm64', 'arm'
+    const archMap = {
+        x64: "amd64",
+        arm64: "arm64",
+        arm: "arm",
+    };
+    const mappedArch = archMap[nodeArch] || nodeArch;
+    return `linux/${mappedArch}`;
+}
 async function getInputs() {
     return {
         "buildx-version": core.getInput("buildx-version"),
@@ -626,15 +649,14 @@ async () => {
         await core.group(`Creating builder instance`, async () => {
             const name = `blacksmith-${Date.now().toString(36)}`;
             setBuilderName(name);
-            // Create the builder
-            const createCmd = await toolkit.buildx.getCommand([
-                "create",
-                "--name",
-                name,
-                "--driver",
-                "remote",
-                builderInfo.addr,
-            ]);
+            // Create the builder with platform configuration
+            const createArgs = ["create", "--name", name, "--driver", "remote"];
+            // Add platform flag - use user-supplied platforms or fallback to host arch
+            const platformFlag = resolveRemoteBuilderPlatforms(inputs.platforms);
+            core.info(`Determined remote builder platform(s): ${platformFlag}`);
+            createArgs.push("--platform", platformFlag);
+            createArgs.push(builderInfo.addr);
+            const createCmd = await toolkit.buildx.getCommand(createArgs);
             core.info(`Creating builder with command: ${createCmd.command} ${createCmd.args.join(" ")}`);
             await Exec.getExecOutput(createCmd.command, createCmd.args, {
                 ignoreReturnCode: true,
