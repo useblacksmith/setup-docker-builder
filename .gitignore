@@ -1,0 +1,6 @@
+.*
+!.git*
+!.npmrc
+!.prettierignore
+
+node_modules/
