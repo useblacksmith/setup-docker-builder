@@ -9,7 +9,7 @@ on:
 jobs:
   test-setup:
     name: Test Setup Docker Builder
-    runs-on: ubuntu-latest
+    runs-on: blacksmith
     steps:
       - name: Checkout
         uses: actions/checkout@v4
