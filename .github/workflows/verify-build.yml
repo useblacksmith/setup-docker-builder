@@ -39,7 +39,8 @@ jobs:
       - name: Install dependencies
         run: |
           pnpm install
-          pnpm add @buf/blacksmith_vm-agent.connectrpc_es@latest @buf/blacksmith_vm-agent.bufbuild_es@latest
+          # Update buf packages to latest if BUF_TOKEN is available
+          pnpm add -w @buf/blacksmith_vm-agent.connectrpc_es@latest @buf/blacksmith_vm-agent.bufbuild_es@latest || true
 
       - name: Build
         run: pnpm run build
