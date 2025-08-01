@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as core from "@actions/core";
-import { ChildProcess, exec, spawn } from "child_process";
+import { exec } from "child_process";
 import { promisify } from "util";
 import * as TOML from "@iarna/toml";
 import * as reporter from "./reporter";
@@ -11,15 +11,8 @@ const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
 
-export async function getTailscaleIP(): Promise<string | null> {
-  try {
-    const { stdout } = await execAsync("tailscale ip -4");
-    return stdout.trim();
-  } catch (error) {
-    core.debug(`Error getting tailscale IP: ${(error as Error).message}`);
-    return null;
-  }
-}
+// Tailscale functions removed - not needed for setup-docker-builder
+// Multi-platform builds are handled differently in the new architecture
 
 async function maybeFormatBlockDevice(device: string): Promise<string> {
   try {
@@ -120,7 +113,6 @@ async function writeBuildkitdTomlFile(
 export async function startBuildkitd(
   parallelism: number,
   addr: string,
-  setupOnly: boolean,
 ): Promise<string> {
   try {
     await writeBuildkitdTomlFile(parallelism, addr);
@@ -129,33 +121,15 @@ export async function startBuildkitd(
     const logStream = fs.createWriteStream("/tmp/buildkitd.log", {
       flags: "a",
     });
-    let buildkitd: ChildProcess;
-    if (!setupOnly) {
-      buildkitd = spawn(
-        "sudo",
-        [
-          "buildkitd",
-          "--debug",
-          "--config=buildkitd.toml",
-          "--allow-insecure-entitlement",
-          "security.insecure",
-          "--allow-insecure-entitlement",
-          "network.host",
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-    } else {
-      const buildkitdCommand =
-        "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
-      buildkitd = execa(buildkitdCommand, {
-        shell: "/bin/bash",
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-        cleanup: false,
-      });
-    }
+    // Start buildkitd in background (detached) mode since we're only setting up
+    const buildkitdCommand =
+      "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
+    const buildkitd = execa(buildkitdCommand, {
+      shell: "/bin/bash",
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      cleanup: false,
+    });
 
     // Pipe stdout and stderr to log file
     if (buildkitd.stdout) {
@@ -238,26 +212,6 @@ export async function getStickyDisk(options?: {
   };
 }
 
-export async function joinTailnet(): Promise<void> {
-  const token = process.env.BLACKSMITH_TAILSCALE_TOKEN;
-  if (!token || token === "unset") {
-    core.debug(
-      "BLACKSMITH_TAILSCALE_TOKEN environment variable not set, skipping tailnet join",
-    );
-    return;
-  }
-
-  try {
-    await execAsync(
-      `sudo tailscale up --authkey=${token} --hostname=${process.env.BLACKSMITH_VM_ID}`,
-    );
-
-    core.info("Successfully joined tailnet");
-  } catch (error) {
-    throw new Error(`Failed to join tailnet: ${(error as Error).message}`);
-  }
-}
-
 export async function leaveTailnet(): Promise<void> {
   try {
     // Check if we're part of a tailnet before trying to leave
@@ -297,27 +251,12 @@ const buildkitdTimeoutMs = 30000;
 
 export async function startAndConfigureBuildkitd(
   parallelism: number,
-  setupOnly: boolean,
   platforms?: string[],
 ): Promise<string> {
-  // For multi-platform builds, we need to use the tailscale IP
-  let buildkitdAddr = BUILDKIT_DAEMON_ADDR;
-  const nativeMultiPlatformBuildsEnabled =
-    false && (platforms?.length ?? 0 > 1);
+  // Use standard buildkitd address
+  const buildkitdAddr = BUILDKIT_DAEMON_ADDR;
 
-  // If we are doing a multi-platform build, we need to join the tailnet and bind buildkitd to the tailscale IP.
-  // We do this so that the remote VM can join the same buildkitd cluster as a worker.
-  if (nativeMultiPlatformBuildsEnabled) {
-    await joinTailnet();
-    const tailscaleIP = await getTailscaleIP();
-    if (!tailscaleIP) {
-      throw new Error("Failed to get tailscale IP for multi-platform build");
-    }
-    buildkitdAddr = `tcp://${tailscaleIP}:1234`;
-    core.info(`Using tailscale IP for multi-platform build: ${buildkitdAddr}`);
-  }
-
-  const addr = await startBuildkitd(parallelism, buildkitdAddr, setupOnly);
+  const addr = await startBuildkitd(parallelism, buildkitdAddr);
   core.debug(`buildkitd daemon started at addr ${addr}`);
 
   // Check that buildkit instance is ready by querying workers for up to 30s
@@ -330,8 +269,8 @@ export async function startAndConfigureBuildkitd(
         `sudo buildctl --addr ${addr} debug workers`,
       );
       const lines = stdout.trim().split("\n");
-      // For multi-platform builds, we need at least 2 workers
-      const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
+      // We only need 1 worker for setup-docker-builder
+      const requiredWorkers = 1;
       if (lines.length > requiredWorkers) {
         core.info(
           `Found ${lines.length - 1} workers, required ${requiredWorkers}`,
@@ -352,7 +291,7 @@ export async function startAndConfigureBuildkitd(
       `sudo buildctl --addr ${addr} debug workers`,
     );
     const lines = stdout.trim().split("\n");
-    const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
+    const requiredWorkers = 1;
     if (lines.length <= requiredWorkers) {
       throw new Error(
         `buildkit workers not ready after ${buildkitdTimeoutMs}ms timeout. Found ${lines.length - 1} workers, required ${requiredWorkers}`,
@@ -395,24 +334,21 @@ const stickyDiskTimeoutMs = 45000;
 
 // setupStickyDisk mounts a sticky disk for the entity and returns the device information.
 // throws an error if it is unable to do so because of a timeout or an error
-export async function setupStickyDisk(
-  dockerfilePath: string,
-  setupOnly: boolean,
-): Promise<{ device: string; buildId?: string | null; exposeId: string }> {
+export async function setupStickyDisk(): Promise<{
+  device: string;
+  exposeId: string;
+}> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
     }, stickyDiskTimeoutMs);
 
-    let buildResponse: { docker_build_id: string } | null = null;
-    let exposeId = "";
-    let device = "";
     const stickyDiskResponse = await getStickyDisk({
       signal: controller.signal,
     });
-    exposeId = stickyDiskResponse.expose_id;
-    device = stickyDiskResponse.device;
+    const exposeId = stickyDiskResponse.expose_id;
+    let device = stickyDiskResponse.device;
     if (device === "") {
       // TODO(adityamaru): Remove this once all of our VM agents are returning the device in the stickydisk response.
       device = "/dev/vdb";
@@ -420,12 +356,7 @@ export async function setupStickyDisk(
     clearTimeout(timeoutId);
     await maybeFormatBlockDevice(device);
 
-    // If setup-only is true, we don't want to report the build to our control plane.
-    let buildId: string | undefined = undefined;
-    if (!setupOnly) {
-      buildResponse = await reporter.reportBuild(dockerfilePath);
-      buildId = buildResponse?.docker_build_id;
-    }
+    // We don't report builds in setup-docker-builder since we're only setting up
     await execAsync(`sudo mkdir -p ${mountPoint}`);
     await execAsync(`sudo mount ${device} ${mountPoint}`);
     core.debug(`${device} has been mounted to ${mountPoint}`);
@@ -453,7 +384,7 @@ export async function setupStickyDisk(
     } catch (error) {
       core.debug(`Error checking inode usage: ${(error as Error).message}`);
     }
-    return { device, buildId, exposeId };
+    return { device, exposeId };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
     throw error;

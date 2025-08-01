@@ -9,7 +9,7 @@ import { GitHub } from '@docker/actions-toolkit/lib/github';
 import { Context } from '@docker/actions-toolkit/lib/context';
 import { Util } from '@docker/actions-toolkit/lib/util';
 import { promisify } from 'util';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import axios from 'axios';
 import axiosRetry from 'axios-retry';
 import { createClient } from '@connectrpc/connect';
@@ -129,16 +129,13 @@ async function commitStickyDisk(exposeId) {
         throw error;
     }
 }
-// Stub for build reporting - not needed in setup-docker-builder
-async function reportBuild(dockerfilePath) {
-    // This is only needed in build-push-action, not in setup
-    return null;
-}
 
 // Constants for configuration.
 const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
 const mountPoint$1 = "/var/lib/buildkit";
 const execAsync$2 = promisify(exec);
+// Tailscale functions removed - not needed for setup-docker-builder
+// Multi-platform builds are handled differently in the new architecture
 async function maybeFormatBlockDevice(device) {
     try {
         // Check if device is formatted with ext4
@@ -223,24 +220,21 @@ async function writeBuildkitdTomlFile(parallelism, addr) {
         throw err;
     }
 }
-async function startBuildkitd(parallelism, addr, setupOnly) {
+async function startBuildkitd(parallelism, addr) {
     try {
         await writeBuildkitdTomlFile(parallelism, addr);
         // Creates a log stream to write buildkitd output to a file.
         const logStream = fs.createWriteStream("/tmp/buildkitd.log", {
             flags: "a",
         });
-        let buildkitd;
-        if (!setupOnly) ;
-        else {
-            const buildkitdCommand = "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
-            buildkitd = execa(buildkitdCommand, {
-                shell: "/bin/bash",
-                stdio: ["ignore", "pipe", "pipe"],
-                detached: true,
-                cleanup: false,
-            });
-        }
+        // Start buildkitd in background (detached) mode since we're only setting up
+        const buildkitdCommand = "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
+        const buildkitd = execa(buildkitdCommand, {
+            shell: "/bin/bash",
+            stdio: ["ignore", "pipe", "pipe"],
+            detached: true,
+            cleanup: false,
+        });
         // Pipe stdout and stderr to log file
         if (buildkitd.stdout) {
             buildkitd.stdout.pipe(logStream);
@@ -341,11 +335,10 @@ async function leaveTailnet() {
 // daemon to start have its socket ready. It also additionally governs how long we will wait for
 // the buildkitd workers to be ready.
 const buildkitdTimeoutMs = 30000;
-async function startAndConfigureBuildkitd(parallelism, setupOnly, platforms) {
-    // For multi-platform builds, we need to use the tailscale IP
-    let buildkitdAddr = BUILDKIT_DAEMON_ADDR;
-    const nativeMultiPlatformBuildsEnabled = false;
-    const addr = await startBuildkitd(parallelism, buildkitdAddr, setupOnly);
+async function startAndConfigureBuildkitd(parallelism, platforms) {
+    // Use standard buildkitd address
+    const buildkitdAddr = BUILDKIT_DAEMON_ADDR;
+    const addr = await startBuildkitd(parallelism, buildkitdAddr);
     core.debug(`buildkitd daemon started at addr ${addr}`);
     // Check that buildkit instance is ready by querying workers for up to 30s
     const startTimeBuildkitReady = Date.now();
@@ -354,8 +347,8 @@ async function startAndConfigureBuildkitd(parallelism, setupOnly, platforms) {
         try {
             const { stdout } = await execAsync$2(`sudo buildctl --addr ${addr} debug workers`);
             const lines = stdout.trim().split("\n");
-            // For multi-platform builds, we need at least 2 workers
-            const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
+            // We only need 1 worker for setup-docker-builder
+            const requiredWorkers = 1;
             if (lines.length > requiredWorkers) {
                 core.info(`Found ${lines.length - 1} workers, required ${requiredWorkers}`);
                 break;
@@ -370,7 +363,7 @@ async function startAndConfigureBuildkitd(parallelism, setupOnly, platforms) {
     try {
         const { stdout } = await execAsync$2(`sudo buildctl --addr ${addr} debug workers`);
         const lines = stdout.trim().split("\n");
-        const requiredWorkers = nativeMultiPlatformBuildsEnabled ? 2 : 1;
+        const requiredWorkers = 1;
         if (lines.length <= requiredWorkers) {
             throw new Error(`buildkit workers not ready after ${buildkitdTimeoutMs}ms timeout. Found ${lines.length - 1} workers, required ${requiredWorkers}`);
         }
@@ -405,29 +398,24 @@ async function pruneBuildkitCache() {
 const stickyDiskTimeoutMs = 45000;
 // setupStickyDisk mounts a sticky disk for the entity and returns the device information.
 // throws an error if it is unable to do so because of a timeout or an error
-async function setupStickyDisk(dockerfilePath, setupOnly) {
+async function setupStickyDisk() {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
             controller.abort();
         }, stickyDiskTimeoutMs);
-        let buildResponse = null;
-        let exposeId = "";
-        let device = "";
         const stickyDiskResponse = await getStickyDisk({
             signal: controller.signal,
         });
-        exposeId = stickyDiskResponse.expose_id;
-        device = stickyDiskResponse.device;
+        let exposeId = stickyDiskResponse.expose_id;
+        let device = stickyDiskResponse.device;
         if (device === "") {
             // TODO(adityamaru): Remove this once all of our VM agents are returning the device in the stickydisk response.
             device = "/dev/vdb";
         }
         clearTimeout(timeoutId);
         await maybeFormatBlockDevice(device);
-        // If setup-only is true, we don't want to report the build to our control plane.
-        let buildId = undefined;
-        if (!setupOnly) ;
+        // We don't report builds in setup-docker-builder since we're only setting up
         await execAsync$2(`sudo mkdir -p ${mountPoint$1}`);
         await execAsync$2(`sudo mount ${device} ${mountPoint$1}`);
         core.debug(`${device} has been mounted to ${mountPoint$1}`);
@@ -445,7 +433,7 @@ async function setupStickyDisk(dockerfilePath, setupOnly) {
         catch (error) {
             core.debug(`Error checking inode usage: ${error.message}`);
         }
-        return { device, buildId, exposeId };
+        return { device, exposeId };
     }
     catch (error) {
         core.warning(`Error in setupStickyDisk: ${error.message}`);
@@ -551,14 +539,14 @@ async function startBlacksmithBuilder(inputs) {
     try {
         // Setup sticky disk
         const stickyDiskStartTime = Date.now();
-        const stickyDiskSetup = await setupStickyDisk("", true); // setupOnly = true
+        const stickyDiskSetup = await setupStickyDisk();
         const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
         await reportMetric(Metric_MetricType.BPA_HOTLOAD_DURATION_MS, stickyDiskDurationMs);
         // Get CPU count for parallelism
         const parallelism = await getNumCPUs();
         // Start buildkitd
         const buildkitdStartTime = Date.now();
-        const buildkitdAddr = await startAndConfigureBuildkitd(parallelism, true, inputs.platforms); // setupOnly = true
+        const buildkitdAddr = await startAndConfigureBuildkitd(parallelism, inputs.platforms);
         const buildkitdDurationMs = Date.now() - buildkitdStartTime;
         await reportMetric(Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS, buildkitdDurationMs);
         // Save state for post action

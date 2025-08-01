@@ -122,10 +122,11 @@ export async function commitStickyDisk(exposeId: string): Promise<void> {
   }
 }
 
-// Stub for build reporting - not needed in setup-docker-builder
+// Stub for build reporting - not used in setup-docker-builder
+// This function is only needed in build-push-action
+// Keeping it here as a stub to maintain interface compatibility
 export async function reportBuild(
   dockerfilePath: string,
 ): Promise<{ docker_build_id: string } | null> {
-  // This is only needed in build-push-action, not in setup
   return null;
 }

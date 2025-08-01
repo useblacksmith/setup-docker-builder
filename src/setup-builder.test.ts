@@ -70,30 +70,7 @@ describe("setup_builder", () => {
     });
   });
 
-  describe("getTailscaleIP", () => {
-    it("should return tailscale IP when available", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        if (cmd.includes("tailscale ip")) {
-          cb(null, { stdout: "100.64.0.1\n", stderr: "" });
-        }
-      });
-
-      const ip = await setupBuilder.getTailscaleIP();
-      expect(ip).toBe("100.64.0.1");
-    });
-
-    it("should return null when tailscale is not available", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        cb(new Error("tailscale not found"), null);
-      });
-
-      const ip = await setupBuilder.getTailscaleIP();
-      expect(ip).toBeNull();
-      expect(core.debug).toHaveBeenCalled();
-    });
-  });
+  // Tailscale tests removed - not needed for setup-docker-builder
 
   describe("pruneBuildkitCache", () => {
     it("should prune buildkit cache successfully", async () => {

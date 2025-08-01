@@ -113,7 +113,7 @@ async function startBlacksmithBuilder(
   try {
     // Setup sticky disk
     const stickyDiskStartTime = Date.now();
-    const stickyDiskSetup = await setupStickyDisk("", true); // setupOnly = true
+    const stickyDiskSetup = await setupStickyDisk();
     const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_HOTLOAD_DURATION_MS,
@@ -127,9 +127,8 @@ async function startBlacksmithBuilder(
     const buildkitdStartTime = Date.now();
     const buildkitdAddr = await startAndConfigureBuildkitd(
       parallelism,
-      true,
       inputs.platforms,
-    ); // setupOnly = true
+    );
     const buildkitdDurationMs = Date.now() - buildkitdStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,
