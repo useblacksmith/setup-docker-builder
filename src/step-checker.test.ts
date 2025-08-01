@@ -32,6 +32,7 @@ describe("Step failure checker", () => {
 
   it("returns no failures when no Worker log files exist", async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(fs.readdir).mockResolvedValue(["some-other-file.txt"] as any);
 
     const result = await checkPreviousStepFailures();
@@ -46,6 +47,7 @@ describe("Step failure checker", () => {
     vi.mocked(fs.readdir).mockResolvedValue([
       "Worker_20240101-120000-utc.log",
       "Worker_20240101-110000-utc.log",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ] as any);
 
     const mockLogContent = `
@@ -67,7 +69,10 @@ describe("Step failure checker", () => {
 
   it("detects failed steps in text format", async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue(["Worker_20240101-120000-utc.log"] as any);
+    vi.mocked(fs.readdir).mockResolvedValue([
+      "Worker_20240101-120000-utc.log",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any);
 
     const mockLogContent = `
     [2024-01-01 12:00:00Z] Step result: Success
@@ -85,7 +90,10 @@ describe("Step failure checker", () => {
 
   it("returns no failures when all steps succeeded", async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue(["Worker_20240101-120000-utc.log"] as any);
+    vi.mocked(fs.readdir).mockResolvedValue([
+      "Worker_20240101-120000-utc.log",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any);
 
     const mockLogContent = `
     {"timestamp":"2024-01-01T12:00:00Z","result":"success","action":"setup"}
@@ -104,7 +112,10 @@ describe("Step failure checker", () => {
 
   it("handles file read errors gracefully", async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue(["Worker_20240101-120000-utc.log"] as any);
+    vi.mocked(fs.readdir).mockResolvedValue([
+      "Worker_20240101-120000-utc.log",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any);
     vi.mocked(fs.readFile).mockRejectedValue(new Error("Permission denied"));
 
     const result = await checkPreviousStepFailures();
@@ -116,7 +127,10 @@ describe("Step failure checker", () => {
 
   it("hasAnyStepFailed returns correct boolean", async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue(["Worker_20240101-120000-utc.log"] as any);
+    vi.mocked(fs.readdir).mockResolvedValue([
+      "Worker_20240101-120000-utc.log",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any);
 
     // First test - with failures
     vi.mocked(fs.readFile).mockResolvedValue('{"result":"failed"}');

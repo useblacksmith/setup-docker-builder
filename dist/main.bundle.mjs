@@ -518,7 +518,8 @@ async function checkPreviousStepFailures(runnerBasePath = process.cwd()) {
                     if (contextEnd > contextStart) {
                         const contextJson = logContent.substring(contextStart, contextEnd);
                         const stepData = JSON.parse(contextJson);
-                        if (stepData.result === "failed" || stepData.result === "cancelled") {
+                        if (stepData.result === "failed" ||
+                            stepData.result === "cancelled") {
                             failedSteps.push({
                                 action: stepData.action,
                                 stepName: stepData.stepName || stepData.displayName,
@@ -532,7 +533,8 @@ async function checkPreviousStepFailures(runnerBasePath = process.cwd()) {
                     // If we can't parse the full context, at least record the failure
                     try {
                         const basicStep = JSON.parse(match);
-                        if (basicStep.result === "failed" || basicStep.result === "cancelled") {
+                        if (basicStep.result === "failed" ||
+                            basicStep.result === "cancelled") {
                             failedSteps.push({
                                 result: basicStep.result,
                             });
