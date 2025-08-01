@@ -10,7 +10,7 @@ export function setTmpDir(tmpDir: string) {
   core.saveState("tmpDir", tmpDir);
 }
 
-export function setInputs(inputs: any) {
+export function setInputs(inputs: unknown) {
   core.saveState("inputs", JSON.stringify(inputs));
 }
 

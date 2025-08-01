@@ -21,7 +21,7 @@ export async function shutdownBuildkitd(): Promise<void> {
         );
         await new Promise((resolve) => setTimeout(resolve, backoff));
       } catch (error) {
-        if ((error as any).code === 1) {
+        if ((error as { code?: number }).code === 1) {
           // pgrep returns exit code 1 when no process is found, which means shutdown successful
           core.debug("buildkitd successfully shutdown");
           return;

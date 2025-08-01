@@ -27,12 +27,12 @@ async function maybeFormatBlockDevice(device: string): Promise<string> {
           // Run resize2fs to ensure filesystem uses full block device
           await execAsync(`sudo resize2fs -f ${device}`);
           core.debug(`Resized ext4 filesystem on ${device}`);
-        } catch (error) {
-          core.warning(`Error resizing ext4 filesystem on ${device}: ${error}`);
+        } catch {
+          core.warning(`Error resizing ext4 filesystem on ${device}`);
         }
         return device;
       }
-    } catch (error) {
+    } catch {
       // blkid returns non-zero if no filesystem found, which is fine
       core.debug(`No filesystem found on ${device}, will format it`);
     }
@@ -157,7 +157,7 @@ export async function startBuildkitd(
           );
           return addr;
         }
-      } catch (error) {
+      } catch {
         // pgrep returns non-zero if process not found, which is expected while waiting
         await new Promise((resolve) => setTimeout(resolve, backoff));
       }
@@ -207,8 +207,8 @@ export async function getStickyDisk(options?: {
     },
   );
   return {
-    expose_id: (response as any).exposeId || "",
-    device: (response as any).diskIdentifier || "",
+    expose_id: (response as { exposeId?: string }).exposeId || "",
+    device: (response as { diskIdentifier?: string }).diskIdentifier || "",
   };
 }
 
@@ -251,7 +251,6 @@ const buildkitdTimeoutMs = 30000;
 
 export async function startAndConfigureBuildkitd(
   parallelism: number,
-  platforms?: string[],
 ): Promise<string> {
   // Use standard buildkitd address
   const buildkitdAddr = BUILDKIT_DAEMON_ADDR;

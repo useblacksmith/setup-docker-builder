@@ -27,13 +27,27 @@ const createBlacksmithAPIClient = () => {
     },
   });
 
-  (axiosRetry as any).default(client, {
+  (
+    axiosRetry as unknown as {
+      default: (client: unknown, options: unknown) => void;
+    }
+  ).default(client, {
     retries: 5,
-    retryDelay: (axiosRetry as any).exponentialDelay,
-    retryCondition: (error: any) => {
+    retryDelay: (
+      axiosRetry as unknown as {
+        exponentialDelay: (retryNumber: number) => number;
+      }
+    ).exponentialDelay,
+    retryCondition: (error: unknown) => {
       return (
-        (axiosRetry as any).isNetworkOrIdempotentRequestError(error) ||
-        (error.response?.status ? error.response.status >= 500 : false)
+        (
+          axiosRetry as unknown as {
+            isNetworkOrIdempotentRequestError: (error: unknown) => boolean;
+          }
+        ).isNetworkOrIdempotentRequestError(error) ||
+        ((error as { response?: { status?: number } }).response?.status
+          ? (error as { response: { status: number } }).response.status >= 500
+          : false)
       );
     },
   });
@@ -125,8 +139,8 @@ export async function commitStickyDisk(exposeId: string): Promise<void> {
 // Stub for build reporting - not used in setup-docker-builder
 // This function is only needed in build-push-action
 // Keeping it here as a stub to maintain interface compatibility
-export async function reportBuild(
-  dockerfilePath: string,
-): Promise<{ docker_build_id: string } | null> {
+export async function reportBuild(): Promise<{
+  docker_build_id: string;
+} | null> {
   return null;
 }

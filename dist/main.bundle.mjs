@@ -63,7 +63,9 @@ const createBlacksmithAPIClient = () => {
         retryDelay: axiosRetry.exponentialDelay,
         retryCondition: (error) => {
             return (axiosRetry.isNetworkOrIdempotentRequestError(error) ||
-                (error.response?.status ? error.response.status >= 500 : false));
+                (error.response?.status
+                    ? error.response.status >= 500
+                    : false));
         },
     });
     return client;
@@ -148,13 +150,13 @@ async function maybeFormatBlockDevice(device) {
                     await execAsync$2(`sudo resize2fs -f ${device}`);
                     core.debug(`Resized ext4 filesystem on ${device}`);
                 }
-                catch (error) {
-                    core.warning(`Error resizing ext4 filesystem on ${device}: ${error}`);
+                catch {
+                    core.warning(`Error resizing ext4 filesystem on ${device}`);
                 }
                 return device;
             }
         }
-        catch (error) {
+        catch {
             // blkid returns non-zero if no filesystem found, which is fine
             core.debug(`No filesystem found on ${device}, will format it`);
         }
@@ -257,7 +259,7 @@ async function startBuildkitd(parallelism, addr) {
                     return addr;
                 }
             }
-            catch (error) {
+            catch {
                 // pgrep returns non-zero if process not found, which is expected while waiting
                 await new Promise((resolve) => setTimeout(resolve, backoff));
             }
@@ -335,7 +337,7 @@ async function leaveTailnet() {
 // daemon to start have its socket ready. It also additionally governs how long we will wait for
 // the buildkitd workers to be ready.
 const buildkitdTimeoutMs = 30000;
-async function startAndConfigureBuildkitd(parallelism, platforms) {
+async function startAndConfigureBuildkitd(parallelism) {
     // Use standard buildkitd address
     const buildkitdAddr = BUILDKIT_DAEMON_ADDR;
     const addr = await startBuildkitd(parallelism, buildkitdAddr);
@@ -546,7 +548,7 @@ async function startBlacksmithBuilder(inputs) {
         const parallelism = await getNumCPUs();
         // Start buildkitd
         const buildkitdStartTime = Date.now();
-        const buildkitdAddr = await startAndConfigureBuildkitd(parallelism, inputs.platforms);
+        const buildkitdAddr = await startAndConfigureBuildkitd(parallelism);
         const buildkitdDurationMs = Date.now() - buildkitdStartTime;
         await reportMetric(Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS, buildkitdDurationMs);
         // Save state for post action
@@ -567,7 +569,7 @@ async function startBlacksmithBuilder(inputs) {
         await leaveTailnet();
     }
 }
-actionsToolkit.run(
+void actionsToolkit.run(
 // main action
 async () => {
     await reportMetric(Metric_MetricType.BPA_FEATURE_USAGE, 1);
@@ -638,7 +640,7 @@ async () => {
                 ignoreReturnCode: true,
             }).then((res) => {
                 if (res.stderr.length > 0 && res.exitCode != 0) {
-                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error");
+                    throw new Error(/(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error");
                 }
             });
             // Set as default builder
@@ -648,7 +650,7 @@ async () => {
                 ignoreReturnCode: true,
             }).then((res) => {
                 if (res.stderr.length > 0 && res.exitCode != 0) {
-                    throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error");
+                    throw new Error(/(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error");
                 }
             });
         });

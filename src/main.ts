@@ -56,8 +56,8 @@ async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error as Error;
       if (
-        (error as any).message?.includes("429") ||
-        (error as any).status === 429
+        (error as Error).message?.includes("429") ||
+        (error as { status?: number }).status === 429
       ) {
         if (attempt < maxRetries - 1) {
           const backoffMs = initialBackoffMs * Math.pow(2, attempt);
@@ -125,10 +125,7 @@ async function startBlacksmithBuilder(
 
     // Start buildkitd
     const buildkitdStartTime = Date.now();
-    const buildkitdAddr = await startAndConfigureBuildkitd(
-      parallelism,
-      inputs.platforms,
-    );
+    const buildkitdAddr = await startAndConfigureBuildkitd(parallelism);
     const buildkitdDurationMs = Date.now() - buildkitdStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,
@@ -162,7 +159,7 @@ async function startBlacksmithBuilder(
   }
 }
 
-actionsToolkit.run(
+void actionsToolkit.run(
   // main action
   async () => {
     await reporter.reportMetric(Metric_MetricType.BPA_FEATURE_USAGE, 1);
@@ -250,7 +247,7 @@ actionsToolkit.run(
         }).then((res) => {
           if (res.stderr.length > 0 && res.exitCode != 0) {
             throw new Error(
-              res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error",
+              /(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
             );
           }
         });
@@ -263,7 +260,7 @@ actionsToolkit.run(
         }).then((res) => {
           if (res.stderr.length > 0 && res.exitCode != 0) {
             throw new Error(
-              res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? "unknown error",
+              /(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
             );
           }
         });
@@ -352,7 +349,7 @@ actionsToolkit.run(
             core.debug("No buildkitd process found running");
           }
         } catch (error) {
-          if ((error as any).code === 1) {
+          if ((error as { code?: number }).code === 1) {
             core.debug("No buildkitd process found running");
           } else {
             core.warning(
@@ -384,7 +381,7 @@ actionsToolkit.run(
             core.info("Unmounted device");
           }
         } catch (error) {
-          if ((error as any).code === 1) {
+          if ((error as { code?: number }).code === 1) {
             core.debug("No dangling mounts found to clean up");
           } else {
             core.warning(`Error during cleanup: ${(error as Error).message}`);

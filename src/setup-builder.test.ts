@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
 import * as setupBuilder from "./setup_builder";
-import * as reporter from "./reporter";
+// import * as reporter from "./reporter";
 
 // Mock the modules
 vi.mock("@actions/core", () => ({
@@ -49,20 +49,32 @@ describe("setup_builder", () => {
 
   describe("getNumCPUs", () => {
     it("should return the number of CPUs", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        cb(null, { stdout: "4\n", stderr: "" });
-      });
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(null, { stdout: "4\n", stderr: "" });
+        },
+      );
 
       const numCPUs = await setupBuilder.getNumCPUs();
       expect(numCPUs).toBe(4);
     });
 
     it("should return 1 if nproc fails", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        cb(new Error("Command failed"), null);
-      });
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(new Error("Command failed"), null);
+        },
+      );
 
       const numCPUs = await setupBuilder.getNumCPUs();
       expect(numCPUs).toBe(1);
@@ -74,12 +86,18 @@ describe("setup_builder", () => {
 
   describe("pruneBuildkitCache", () => {
     it("should prune buildkit cache successfully", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        if (cmd.includes("buildctl") && cmd.includes("prune")) {
-          cb(null, { stdout: "Cache pruned", stderr: "" });
-        }
-      });
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          if (cmd.includes("buildctl") && cmd.includes("prune")) {
+            cb(null, { stdout: "Cache pruned", stderr: "" });
+          }
+        },
+      );
 
       await setupBuilder.pruneBuildkitCache();
       expect(core.debug).toHaveBeenCalledWith(
@@ -88,10 +106,16 @@ describe("setup_builder", () => {
     });
 
     it("should handle prune errors", async () => {
-      const exec = (await import("child_process")).exec as any;
-      exec.mockImplementation((cmd: string, cb: Function) => {
-        cb(new Error("Prune failed"), null);
-      });
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(new Error("Prune failed"), null);
+        },
+      );
 
       await expect(setupBuilder.pruneBuildkitCache()).rejects.toThrow();
       expect(core.warning).toHaveBeenCalled();
