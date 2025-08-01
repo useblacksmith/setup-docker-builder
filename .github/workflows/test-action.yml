@@ -60,7 +60,3 @@ jobs:
           EOF
           docker buildx build --platform linux/amd64 .
         continue-on-error: true
-
-      - name: Sleep
-        run: |
-         sleep 4500
