@@ -9,20 +9,26 @@ export default {
     format: "es",
   },
   external: (id) => {
-    // Mark all dependencies as external
+    // Only mark Node.js built-in modules as external
     if (
-      id.startsWith("@actions/") ||
-      id.startsWith("@docker/") ||
-      id.startsWith("@buf/") ||
-      id.startsWith("@connectrpc/") ||
-      id.startsWith("@iarna/") ||
-      id === "axios" ||
-      id === "axios-retry" ||
-      id === "execa" ||
       id === "child_process" ||
       id === "fs" ||
       id === "path" ||
-      id === "util"
+      id === "util" ||
+      id === "os" ||
+      id === "crypto" ||
+      id === "stream" ||
+      id === "http" ||
+      id === "https" ||
+      id === "net" ||
+      id === "tls" ||
+      id === "url" ||
+      id === "assert" ||
+      id === "buffer" ||
+      id === "events" ||
+      id === "querystring" ||
+      id === "string_decoder" ||
+      id === "zlib"
     ) {
       return true;
     }
