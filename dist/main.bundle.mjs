@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { promises } from 'fs';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
@@ -454,6 +455,111 @@ function resolveRemoteBuilderPlatforms(platforms) {
     return `linux/${mappedArch}`;
 }
 
+/**
+ * Checks GitHub Actions runner logs for failed or cancelled steps
+ * @param runnerBasePath - Base path to runner directory (default: current directory)
+ * @returns Promise<StepFailureCheck> - Object containing failure status and details
+ */
+async function checkPreviousStepFailures(runnerBasePath = process.cwd()) {
+    try {
+        // Find the Worker log file in _diag directory
+        const diagPath = path.join(runnerBasePath, "_diag");
+        // Check if _diag directory exists
+        try {
+            await promises.access(diagPath);
+        }
+        catch {
+            return {
+                hasFailures: false,
+                failedCount: 0,
+                error: "_diag directory not found",
+            };
+        }
+        // Find Worker log files (format: Worker_YYYYMMDD-HHMMSS-utc.log)
+        const files = await promises.readdir(diagPath);
+        const workerLogFiles = files.filter((f) => f.startsWith("Worker_") && f.endsWith(".log"));
+        if (workerLogFiles.length === 0) {
+            return {
+                hasFailures: false,
+                failedCount: 0,
+                error: "No Worker log files found",
+            };
+        }
+        // Use the most recent Worker log
+        const workerLogPath = path.join(diagPath, workerLogFiles.sort().pop());
+        const logContent = await promises.readFile(workerLogPath, "utf-8");
+        // Patterns to match failed or cancelled steps
+        const failurePatterns = [
+            /"result":\s*"failed"/g,
+            /"result":\s*"cancelled"/g,
+            /Step result:\s*Failed/g,
+            /Step result:\s*Cancelled/g,
+        ];
+        // Count total failures
+        let failedCount = 0;
+        for (const pattern of failurePatterns) {
+            const matches = logContent.match(pattern);
+            if (matches) {
+                failedCount += matches.length;
+            }
+        }
+        // Extract detailed failure information
+        const failedSteps = [];
+        // Regex to extract JSON objects containing step information
+        const jsonStepPattern = /\{[^{}]*"result":\s*"(?:failed|cancelled)"[^{}]*\}/g;
+        const jsonMatches = logContent.match(jsonStepPattern);
+        if (jsonMatches) {
+            for (const match of jsonMatches) {
+                try {
+                    // Try to find a larger JSON context that includes action name and error messages
+                    const startIndex = logContent.indexOf(match);
+                    const contextStart = Math.max(0, logContent.lastIndexOf("{", startIndex - 500));
+                    const contextEnd = logContent.indexOf("}.", startIndex) + 1;
+                    if (contextEnd > contextStart) {
+                        const contextJson = logContent.substring(contextStart, contextEnd);
+                        const stepData = JSON.parse(contextJson);
+                        if (stepData.result === "failed" || stepData.result === "cancelled") {
+                            failedSteps.push({
+                                action: stepData.action,
+                                stepName: stepData.stepName || stepData.displayName,
+                                result: stepData.result,
+                                errorMessages: stepData.errorMessages,
+                            });
+                        }
+                    }
+                }
+                catch {
+                    // If we can't parse the full context, at least record the failure
+                    try {
+                        const basicStep = JSON.parse(match);
+                        if (basicStep.result === "failed" || basicStep.result === "cancelled") {
+                            failedSteps.push({
+                                result: basicStep.result,
+                            });
+                        }
+                    }
+                    catch {
+                        // Skip malformed JSON
+                        core.debug("Skipping malformed JSON in log parsing");
+                    }
+                }
+            }
+        }
+        return {
+            hasFailures: failedCount > 0,
+            failedCount,
+            failedSteps: failedSteps.length > 0 ? failedSteps : undefined,
+        };
+    }
+    catch (error) {
+        return {
+            hasFailures: false,
+            failedCount: 0,
+            error: `Error reading logs: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
+}
+
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
@@ -676,15 +782,14 @@ async () => {
 // post action - cleanup
 async () => {
     await core.group("Cleaning up Docker builder", async () => {
-        let cleanupSuccessful = true;
-        let buildkitdShutdownSuccessful = false;
-        let unmountSuccessful = false;
+        const exposeId = getExposeId();
+        let cleanupError = null;
         try {
-            // Check if buildkitd is running
+            // Step 1: Check if buildkitd is running and shut it down
             try {
                 const { stdout } = await execAsync("pgrep buildkitd");
                 if (stdout.trim()) {
-                    // Prune cache before shutdown
+                    // Optional: Prune cache before shutdown (non-critical)
                     try {
                         core.info("Pruning BuildKit cache");
                         await pruneBuildkitCache();
@@ -694,80 +799,56 @@ async () => {
                         core.warning(`Error pruning BuildKit cache: ${error.message}`);
                         // Don't fail cleanup for cache prune errors
                     }
-                    // Shutdown buildkitd
-                    try {
-                        const buildkitdShutdownStartTime = Date.now();
-                        await shutdownBuildkitd();
-                        const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
-                        await reportMetric(Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS, buildkitdShutdownDurationMs);
-                        core.info("Shutdown buildkitd gracefully");
-                        buildkitdShutdownSuccessful = true;
-                    }
-                    catch (error) {
-                        core.error(`Failed to shutdown buildkitd gracefully: ${error.message}`);
-                        cleanupSuccessful = false;
-                    }
+                    // Critical: Shutdown buildkitd
+                    const buildkitdShutdownStartTime = Date.now();
+                    await shutdownBuildkitd();
+                    const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
+                    await reportMetric(Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS, buildkitdShutdownDurationMs);
+                    core.info("Shutdown buildkitd gracefully");
                 }
                 else {
                     core.debug("No buildkitd process found running");
-                    buildkitdShutdownSuccessful = true; // No process to shutdown is considered successful
                 }
             }
             catch (error) {
-                if (error.code === 1) {
-                    core.debug("No buildkitd process found running");
-                    buildkitdShutdownSuccessful = true; // No process to shutdown is considered successful
+                // pgrep returns exit code 1 when no process found, which is OK
+                if (error.code !== 1) {
+                    throw new Error(`Failed to check/shutdown buildkitd: ${error.message}`);
                 }
-                else {
-                    core.warning(`Error checking for buildkitd processes: ${error.message}`);
-                    cleanupSuccessful = false;
-                }
+                core.debug("No buildkitd process found (pgrep returned 1)");
             }
-            // Sync and unmount sticky disk
+            // Step 2: Sync and unmount sticky disk
+            await execAsync("sync");
             try {
-                await execAsync("sync");
                 const { stdout: mountOutput } = await execAsync(`mount | grep ${mountPoint}`);
                 if (mountOutput) {
                     for (let attempt = 1; attempt <= 3; attempt++) {
                         try {
                             await execAsync(`sudo umount ${mountPoint}`);
-                            core.debug(`${mountPoint} has been unmounted`);
-                            unmountSuccessful = true;
+                            core.info(`Successfully unmounted ${mountPoint}`);
                             break;
                         }
                         catch (error) {
                             if (attempt === 3) {
-                                core.error(`Failed to unmount ${mountPoint} after 3 attempts: ${error.message}`);
-                                cleanupSuccessful = false;
-                                unmountSuccessful = false;
+                                throw new Error(`Failed to unmount ${mountPoint} after 3 attempts: ${error.message}`);
                             }
-                            else {
-                                core.warning(`Unmount failed, retrying (${attempt}/3)...`);
-                                await new Promise((resolve) => setTimeout(resolve, 100));
-                            }
+                            core.warning(`Unmount failed, retrying (${attempt}/3)...`);
+                            await new Promise((resolve) => setTimeout(resolve, 100));
                         }
-                    }
-                    if (unmountSuccessful) {
-                        core.info("Unmounted sticky disk successfully");
                     }
                 }
                 else {
                     core.debug("No sticky disk mount found");
-                    unmountSuccessful = true; // No mount to unmount is considered successful
                 }
             }
             catch (error) {
-                if (error.code === 1) {
-                    core.debug("No dangling mounts found to clean up");
-                    unmountSuccessful = true; // No mount to unmount is considered successful
+                // grep returns exit code 1 when no matches, which is OK
+                if (error.code !== 1) {
+                    throw new Error(`Failed to unmount sticky disk: ${error.message}`);
                 }
-                else {
-                    core.error(`Error during unmount: ${error.message}`);
-                    cleanupSuccessful = false;
-                    unmountSuccessful = false;
-                }
+                core.debug("No sticky disk mount found (grep returned 1)");
             }
-            // Clean up temp directory
+            // Step 3: Clean up temp directory (non-critical)
             if (tmpDir.length > 0) {
                 try {
                     fs.rmSync(tmpDir, { recursive: true });
@@ -778,14 +859,37 @@ async () => {
                     // Don't fail cleanup for temp directory removal
                 }
             }
-            // Only commit sticky disk if cleanup was successful
-            const exposeId = getExposeId();
-            if (exposeId) {
-                if (cleanupSuccessful &&
-                    buildkitdShutdownSuccessful &&
-                    unmountSuccessful) {
-                    core.info("All cleanup steps successful, committing sticky disk");
+            // If we made it here, all critical cleanup steps succeeded
+            core.info("All critical cleanup steps completed successfully");
+        }
+        catch (error) {
+            cleanupError = error;
+            core.error(`Cleanup failed: ${cleanupError.message}`);
+            await reportBuildPushActionFailure(cleanupError, "docker builder cleanup");
+        }
+        // Step 4: Check for previous step failures before committing
+        if (exposeId) {
+            if (!cleanupError) {
+                // Check if any previous steps failed or were cancelled
+                core.info("Checking for previous step failures before committing sticky disk");
+                const failureCheck = await checkPreviousStepFailures();
+                if (failureCheck.error) {
+                    core.warning(`Unable to check for previous step failures: ${failureCheck.error}`);
+                    core.warning("Skipping sticky disk commit due to ambiguity in failure detection");
+                }
+                else if (failureCheck.hasFailures) {
+                    core.warning(`Found ${failureCheck.failedCount} failed/cancelled steps in previous workflow steps`);
+                    if (failureCheck.failedSteps) {
+                        failureCheck.failedSteps.forEach((step) => {
+                            core.warning(`  - Step: ${step.stepName || step.action || "unknown"} (${step.result})`);
+                        });
+                    }
+                    core.warning("Skipping sticky disk commit due to previous step failures");
+                }
+                else {
+                    // No failures detected and cleanup was successful
                     try {
+                        core.info("No previous step failures detected, committing sticky disk after successful cleanup");
                         await commitStickyDisk(exposeId);
                         core.info("Successfully committed sticky disk");
                     }
@@ -794,21 +898,13 @@ async () => {
                         await reportBuildPushActionFailure(error, "sticky disk commit");
                     }
                 }
-                else {
-                    core.warning("Skipping sticky disk commit due to cleanup failures. " +
-                        `Cleanup successful: ${cleanupSuccessful}, ` +
-                        `Buildkitd shutdown: ${buildkitdShutdownSuccessful}, ` +
-                        `Unmount successful: ${unmountSuccessful}`);
-                    await reportBuildPushActionFailure(new Error("Cleanup failed, skipping sticky disk commit"), "docker builder cleanup");
-                }
             }
             else {
-                core.warning("Expose ID not found in state, skipping sticky disk commit");
+                core.warning(`Skipping sticky disk commit due to cleanup error: ${cleanupError.message}`);
             }
         }
-        catch (error) {
-            core.error(`Unexpected error during Docker builder cleanup: ${error.message}`);
-            await reportBuildPushActionFailure(error, "docker builder cleanup");
+        else {
+            core.warning("Expose ID not found in state, skipping sticky disk commit");
         }
     });
 });
