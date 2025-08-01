@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import * as core from "@actions/core";
 import * as actionsToolkit from "@docker/actions-toolkit";
@@ -22,6 +21,7 @@ import {
   pruneBuildkitCache,
 } from "./setup_builder";
 import { shutdownBuildkitd } from "./shutdown";
+import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
@@ -34,30 +34,6 @@ export interface Inputs {
   platforms: string[];
   nofallback: boolean;
   "github-token": string;
-}
-
-/**
- * Resolve the platform list that should be passed to `docker buildx create`.
- *
- * Priority:
- *   1. Use the user-supplied platforms list (comma-joined) if provided.
- *   2. Fallback to the architecture of the host runner.
- */
-function resolveRemoteBuilderPlatforms(platforms?: string[]): string {
-  // If user explicitly provided platforms, honour them verbatim.
-  if (platforms && platforms.length > 0) {
-    return platforms.join(",");
-  }
-
-  // Otherwise derive from host architecture.
-  const nodeArch = os.arch(); // e.g. 'x64', 'arm64', 'arm'
-  const archMap: { [key: string]: string } = {
-    x64: "amd64",
-    arm64: "arm64",
-    arm: "arm",
-  };
-  const mappedArch = archMap[nodeArch] || nodeArch;
-  return `linux/${mappedArch}`;
 }
 
 async function getInputs(): Promise<Inputs> {

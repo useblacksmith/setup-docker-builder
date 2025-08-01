@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
@@ -19,6 +18,7 @@ import { StickyDiskService } from '@buf/blacksmith_vm-agent.connectrpc_es/sticky
 import { Metric, Metric_MetricType } from '@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js';
 import * as TOML from '@iarna/toml';
 import { execa } from 'execa';
+import * as os from 'os';
 
 // State variables needed for setup-docker-builder
 const tmpDir = process.env.STATE_tmpDir || "";
@@ -476,9 +476,6 @@ async function shutdownBuildkitd() {
     }
 }
 
-const DEFAULT_BUILDX_VERSION = "v0.23.0";
-const mountPoint = "/var/lib/buildkit";
-const execAsync = promisify(exec);
 /**
  * Resolve the platform list that should be passed to `docker buildx create`.
  *
@@ -501,6 +498,10 @@ function resolveRemoteBuilderPlatforms(platforms) {
     const mappedArch = archMap[nodeArch] || nodeArch;
     return `linux/${mappedArch}`;
 }
+
+const DEFAULT_BUILDX_VERSION = "v0.23.0";
+const mountPoint = "/var/lib/buildkit";
+const execAsync = promisify(exec);
 async function getInputs() {
     return {
         "buildx-version": core.getInput("buildx-version"),
