@@ -212,38 +212,6 @@ export async function getStickyDisk(options?: {
   };
 }
 
-export async function leaveTailnet(): Promise<void> {
-  try {
-    // Check if we're part of a tailnet before trying to leave
-    try {
-      const { stdout } = await execAsync("sudo tailscale status");
-      if (stdout.trim() !== "") {
-        await execAsync("sudo tailscale down");
-        core.debug("Successfully left tailnet.");
-      } else {
-        core.debug("Not part of a tailnet, skipping leave.");
-      }
-    } catch (error: unknown) {
-      // Type guard for ExecException which has the code property
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === 1
-      ) {
-        core.debug("Not part of a tailnet, skipping leave.");
-        return;
-      }
-      // Any other exit code indicates a real error
-      throw error;
-    }
-  } catch (error) {
-    core.warning(
-      `Error leaving tailnet: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
 // buildkitdTimeoutMs states the max amount of time this action will wait for the buildkitd
 // daemon to start have its socket ready. It also additionally governs how long we will wait for
 // the buildkitd workers to be ready.
@@ -347,42 +315,18 @@ export async function setupStickyDisk(): Promise<{
       signal: controller.signal,
     });
     const exposeId = stickyDiskResponse.expose_id;
-    let device = stickyDiskResponse.device;
+    const device = stickyDiskResponse.device;
     if (device === "") {
-      // TODO(adityamaru): Remove this once all of our VM agents are returning the device in the stickydisk response.
-      device = "/dev/vdb";
+      throw new Error("No device found in sticky disk response");
     }
     clearTimeout(timeoutId);
     await maybeFormatBlockDevice(device);
 
-    // We don't report builds in setup-docker-builder since we're only setting up
     await execAsync(`sudo mkdir -p ${mountPoint}`);
     await execAsync(`sudo mount ${device} ${mountPoint}`);
     core.debug(`${device} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
 
-    // Check inode usage at mountpoint, and report if over 80%.
-    try {
-      const { stdout } = await execAsync(
-        `df -i ${mountPoint} | tail -1 | awk '{print $5}' | sed 's/%//'`,
-      );
-      const inodePercentage = parseInt(stdout.trim());
-      if (!isNaN(inodePercentage) && inodePercentage > 80) {
-        // Report if over 80%
-        await reporter.reportBuildPushActionFailure(
-          new Error(
-            `High inode usage (${inodePercentage}%) detected at ${mountPoint}`,
-          ),
-          "setupStickyDisk",
-          true /* isWarning */,
-        );
-        core.warning(
-          `High inode usage (${inodePercentage}%) detected at ${mountPoint}`,
-        );
-      }
-    } catch (error) {
-      core.debug(`Error checking inode usage: ${(error as Error).message}`);
-    }
     return { device, exposeId };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);

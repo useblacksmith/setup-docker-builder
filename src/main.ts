@@ -17,7 +17,6 @@ import {
   setupStickyDisk,
   startAndConfigureBuildkitd,
   getNumCPUs,
-  leaveTailnet,
   pruneBuildkitCache,
 } from "./setup_builder";
 import { shutdownBuildkitd } from "./shutdown";
@@ -155,8 +154,6 @@ async function startBlacksmithBuilder(
       `Error during Blacksmith builder setup: ${(error as Error).message}. Falling back to local builder.`,
     );
     return { addr: null, exposeId: "" };
-  } finally {
-    await leaveTailnet();
   }
 }
 
@@ -320,9 +317,11 @@ void actionsToolkit.run(
   // post action - cleanup
   async () => {
     await core.group("Cleaning up Docker builder", async () => {
-      try {
-        await leaveTailnet();
+      let cleanupSuccessful = true;
+      let buildkitdShutdownSuccessful = false;
+      let unmountSuccessful = false;
 
+      try {
         // Check if buildkitd is running
         try {
           const { stdout } = await execAsync("pgrep buildkitd");
@@ -336,32 +335,44 @@ void actionsToolkit.run(
               core.warning(
                 `Error pruning BuildKit cache: ${(error as Error).message}`,
               );
+              // Don't fail cleanup for cache prune errors
             }
 
             // Shutdown buildkitd
-            const buildkitdShutdownStartTime = Date.now();
-            await shutdownBuildkitd();
-            const buildkitdShutdownDurationMs =
-              Date.now() - buildkitdShutdownStartTime;
-            await reporter.reportMetric(
-              Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
-              buildkitdShutdownDurationMs,
-            );
-            core.info("Shutdown buildkitd");
+            try {
+              const buildkitdShutdownStartTime = Date.now();
+              await shutdownBuildkitd();
+              const buildkitdShutdownDurationMs =
+                Date.now() - buildkitdShutdownStartTime;
+              await reporter.reportMetric(
+                Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
+                buildkitdShutdownDurationMs,
+              );
+              core.info("Shutdown buildkitd gracefully");
+              buildkitdShutdownSuccessful = true;
+            } catch (error) {
+              core.error(
+                `Failed to shutdown buildkitd gracefully: ${(error as Error).message}`,
+              );
+              cleanupSuccessful = false;
+            }
           } else {
             core.debug("No buildkitd process found running");
+            buildkitdShutdownSuccessful = true; // No process to shutdown is considered successful
           }
         } catch (error) {
           if ((error as { code?: number }).code === 1) {
             core.debug("No buildkitd process found running");
+            buildkitdShutdownSuccessful = true; // No process to shutdown is considered successful
           } else {
             core.warning(
               `Error checking for buildkitd processes: ${(error as Error).message}`,
             );
+            cleanupSuccessful = false;
           }
         }
 
-        // Unmount sticky disk
+        // Sync and unmount sticky disk
         try {
           await execAsync("sync");
           const { stdout: mountOutput } = await execAsync(
@@ -372,44 +383,93 @@ void actionsToolkit.run(
               try {
                 await execAsync(`sudo umount ${mountPoint}`);
                 core.debug(`${mountPoint} has been unmounted`);
+                unmountSuccessful = true;
                 break;
               } catch (error) {
                 if (attempt === 3) {
-                  throw error;
+                  core.error(
+                    `Failed to unmount ${mountPoint} after 3 attempts: ${(error as Error).message}`,
+                  );
+                  cleanupSuccessful = false;
+                  unmountSuccessful = false;
+                } else {
+                  core.warning(`Unmount failed, retrying (${attempt}/3)...`);
+                  await new Promise((resolve) => setTimeout(resolve, 100));
                 }
-                core.warning(`Unmount failed, retrying (${attempt}/3)...`);
-                await new Promise((resolve) => setTimeout(resolve, 100));
               }
             }
-            core.info("Unmounted device");
+            if (unmountSuccessful) {
+              core.info("Unmounted sticky disk successfully");
+            }
+          } else {
+            core.debug("No sticky disk mount found");
+            unmountSuccessful = true; // No mount to unmount is considered successful
           }
         } catch (error) {
           if ((error as { code?: number }).code === 1) {
             core.debug("No dangling mounts found to clean up");
+            unmountSuccessful = true; // No mount to unmount is considered successful
           } else {
-            core.warning(`Error during cleanup: ${(error as Error).message}`);
+            core.error(`Error during unmount: ${(error as Error).message}`);
+            cleanupSuccessful = false;
+            unmountSuccessful = false;
           }
         }
 
         // Clean up temp directory
         if (stateHelper.tmpDir.length > 0) {
-          fs.rmSync(stateHelper.tmpDir, { recursive: true });
-          core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
+          try {
+            fs.rmSync(stateHelper.tmpDir, { recursive: true });
+            core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
+          } catch (error) {
+            core.warning(
+              `Failed to remove temp directory: ${(error as Error).message}`,
+            );
+            // Don't fail cleanup for temp directory removal
+          }
         }
 
-        // Commit sticky disk
+        // Only commit sticky disk if cleanup was successful
         const exposeId = stateHelper.getExposeId();
         if (exposeId) {
-          core.info("Committing sticky disk");
-          await reporter.commitStickyDisk(exposeId);
+          if (
+            cleanupSuccessful &&
+            buildkitdShutdownSuccessful &&
+            unmountSuccessful
+          ) {
+            core.info("All cleanup steps successful, committing sticky disk");
+            try {
+              await reporter.commitStickyDisk(exposeId);
+              core.info("Successfully committed sticky disk");
+            } catch (error) {
+              core.error(
+                `Failed to commit sticky disk: ${(error as Error).message}`,
+              );
+              await reporter.reportBuildPushActionFailure(
+                error as Error,
+                "sticky disk commit",
+              );
+            }
+          } else {
+            core.warning(
+              "Skipping sticky disk commit due to cleanup failures. " +
+                `Cleanup successful: ${cleanupSuccessful}, ` +
+                `Buildkitd shutdown: ${buildkitdShutdownSuccessful}, ` +
+                `Unmount successful: ${unmountSuccessful}`,
+            );
+            await reporter.reportBuildPushActionFailure(
+              new Error("Cleanup failed, skipping sticky disk commit"),
+              "docker builder cleanup",
+            );
+          }
         } else {
           core.warning(
             "Expose ID not found in state, skipping sticky disk commit",
           );
         }
       } catch (error) {
-        core.warning(
-          `Error during Docker builder cleanup: ${(error as Error).message}`,
+        core.error(
+          `Unexpected error during Docker builder cleanup: ${(error as Error).message}`,
         );
         await reporter.reportBuildPushActionFailure(
           error as Error,
