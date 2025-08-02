@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as path from "path";
 import * as core from "@actions/core";
 import * as actionsToolkit from "@docker/actions-toolkit";
 import { Toolkit } from "@docker/actions-toolkit/lib/toolkit";
@@ -139,11 +138,6 @@ async function startBlacksmithBuilder(
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
-    await reporter.reportBuildPushActionFailure(
-      error as Error,
-      "starting blacksmith builder",
-    );
-
     if (inputs.nofallback) {
       core.warning(
         `Error during Blacksmith builder setup: ${(error as Error).message}. Failing because nofallback is set.`,
@@ -302,17 +296,6 @@ void actionsToolkit.run(
       });
     }
 
-    // Create sentinel file to indicate setup is complete
-    const sentinelPath = path.join("/tmp", "builder-setup-complete");
-    try {
-      fs.writeFileSync(sentinelPath, "Builder setup completed successfully.");
-      core.debug(`Created builder setup sentinel file at ${sentinelPath}`);
-    } catch (error) {
-      core.warning(
-        `Failed to create builder setup sentinel file: ${(error as Error).message}`,
-      );
-    }
-
     stateHelper.setTmpDir(Context.tmpDir());
   },
   // post action - cleanup
@@ -416,6 +399,7 @@ void actionsToolkit.run(
         cleanupError = error as Error;
         core.error(`Cleanup failed: ${cleanupError.message}`);
         await reporter.reportBuildPushActionFailure(
+          "BUILDER_CLEANUP",
           cleanupError,
           "docker builder cleanup",
         );
@@ -463,6 +447,7 @@ void actionsToolkit.run(
                 `Failed to commit sticky disk: ${(error as Error).message}`,
               );
               await reporter.reportBuildPushActionFailure(
+                "STICKYDISK_COMMIT",
                 error as Error,
                 "sticky disk commit",
               );

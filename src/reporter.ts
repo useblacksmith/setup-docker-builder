@@ -68,9 +68,13 @@ export function createBlacksmithAgentClient() {
 }
 
 export async function reportBuildPushActionFailure(
+  type:
+    | "BUILDER_STARTUP"
+    | "BUILDER_CLEANUP"
+    | "STICKYDISK_SETUP"
+    | "STICKYDISK_COMMIT",
   error?: Error,
   event?: string,
-  isWarning?: boolean,
 ) {
   const requestOptions = {
     stickydisk_key: process.env.GITHUB_REPO_NAME || "",
@@ -79,8 +83,8 @@ export async function reportBuildPushActionFailure(
     arch: process.env.BLACKSMITH_ENV?.includes("arm") ? "arm64" : "amd64",
     vm_id: process.env.BLACKSMITH_VM_ID || "",
     petname: process.env.PETNAME || "",
+    type: type,
     message: event ? `${event}: ${error?.message || ""}` : error?.message || "",
-    warning: isWarning || false,
   };
 
   try {
