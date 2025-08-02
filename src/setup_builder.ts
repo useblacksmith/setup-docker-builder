@@ -169,10 +169,9 @@ export async function startBuildkitd(
   } catch (error) {
     core.error(`failed to start buildkitd daemon: ${(error as Error).message}`);
     await reporter.reportBuildPushActionFailure(
+      "BUILDER_STARTUP",
       error as Error,
       "buildkitd startup",
-      false,
-      "BUILDER_STARTUP",
     );
     throw error;
   }
@@ -337,10 +336,9 @@ export async function setupStickyDisk(): Promise<{
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
     await reporter.reportBuildPushActionFailure(
+      "STICKYDISK_SETUP",
       error as Error,
       "sticky disk setup",
-      false,
-      "STICKYDISK_SETUP",
     );
     throw error;
   }

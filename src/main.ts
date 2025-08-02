@@ -139,13 +139,6 @@ async function startBlacksmithBuilder(
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
-    await reporter.reportBuildPushActionFailure(
-      error as Error,
-      "starting blacksmith builder",
-      false,
-      "BUILDER_STARTUP",
-    );
-
     if (inputs.nofallback) {
       core.warning(
         `Error during Blacksmith builder setup: ${(error as Error).message}. Failing because nofallback is set.`,
@@ -418,10 +411,9 @@ void actionsToolkit.run(
         cleanupError = error as Error;
         core.error(`Cleanup failed: ${cleanupError.message}`);
         await reporter.reportBuildPushActionFailure(
+          "BUILDER_CLEANUP",
           cleanupError,
           "docker builder cleanup",
-          false,
-          "BUILDER_CLEANUP",
         );
       }
 
@@ -467,10 +459,9 @@ void actionsToolkit.run(
                 `Failed to commit sticky disk: ${(error as Error).message}`,
               );
               await reporter.reportBuildPushActionFailure(
+                "STICKYDISK_COMMIT",
                 error as Error,
                 "sticky disk commit",
-                false,
-                "STICKYDISK_COMMIT",
               );
             }
           }
