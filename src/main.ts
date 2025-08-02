@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as path from "path";
 import * as core from "@actions/core";
 import * as actionsToolkit from "@docker/actions-toolkit";
 import { Toolkit } from "@docker/actions-toolkit/lib/toolkit";
@@ -295,17 +294,6 @@ void actionsToolkit.run(
           );
         }
       });
-    }
-
-    // Create sentinel file to indicate setup is complete
-    const sentinelPath = path.join("/tmp", "builder-setup-complete");
-    try {
-      fs.writeFileSync(sentinelPath, "Builder setup completed successfully.");
-      core.debug(`Created builder setup sentinel file at ${sentinelPath}`);
-    } catch (error) {
-      core.warning(
-        `Failed to create builder setup sentinel file: ${(error as Error).message}`,
-      );
     }
 
     stateHelper.setTmpDir(Context.tmpDir());
