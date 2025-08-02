@@ -142,6 +142,8 @@ async function startBlacksmithBuilder(
     await reporter.reportBuildPushActionFailure(
       error as Error,
       "starting blacksmith builder",
+      false,
+      "BUILDER_STARTUP",
     );
 
     if (inputs.nofallback) {
@@ -418,6 +420,8 @@ void actionsToolkit.run(
         await reporter.reportBuildPushActionFailure(
           cleanupError,
           "docker builder cleanup",
+          false,
+          "BUILDER_CLEANUP",
         );
       }
 
@@ -465,6 +469,8 @@ void actionsToolkit.run(
               await reporter.reportBuildPushActionFailure(
                 error as Error,
                 "sticky disk commit",
+                false,
+                "STICKYDISK_COMMIT",
               );
             }
           }

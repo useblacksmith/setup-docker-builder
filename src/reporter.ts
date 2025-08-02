@@ -71,6 +71,11 @@ export async function reportBuildPushActionFailure(
   error?: Error,
   event?: string,
   isWarning?: boolean,
+  type?:
+    | "BUILDER_STARTUP"
+    | "BUILDER_CLEANUP"
+    | "STICKYDISK_SETUP"
+    | "STICKYDISK_COMMIT",
 ) {
   const requestOptions = {
     stickydisk_key: process.env.GITHUB_REPO_NAME || "",
@@ -79,6 +84,7 @@ export async function reportBuildPushActionFailure(
     arch: process.env.BLACKSMITH_ENV?.includes("arm") ? "arm64" : "amd64",
     vm_id: process.env.BLACKSMITH_VM_ID || "",
     petname: process.env.PETNAME || "",
+    type: type || "BUILDER_STARTUP",
     message: event ? `${event}: ${error?.message || ""}` : error?.message || "",
     warning: isWarning || false,
   };
