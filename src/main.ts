@@ -458,7 +458,6 @@ void actionsToolkit.run(
                 "No previous step failures detected, committing sticky disk after successful cleanup",
               );
               await reporter.commitStickyDisk(exposeId);
-              core.info("Successfully committed sticky disk");
             } catch (error) {
               core.error(
                 `Failed to commit sticky disk: ${(error as Error).message}`,

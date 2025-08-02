@@ -27,7 +27,7 @@ describe("Step failure checker", () => {
 
     expect(result.hasFailures).toBe(false);
     expect(result.failedCount).toBe(0);
-    expect(result.error).toBe("_diag directory not found");
+    expect(result.error).toContain("_diag directory not found at");
   });
 
   it("returns no failures when no Worker log files exist", async () => {
