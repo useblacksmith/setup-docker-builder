@@ -1,0 +1,62 @@
+name: Test Action
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test-setup:
+    name: Test Setup Docker Builder
+    runs-on: blacksmith
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Configure npm for buf registry
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          npm config set @buf:registry https://buf.build/gen/npm/v1/
+          npm config set //buf.build/gen/npm/v1/:_authToken $BUF_TOKEN
+
+      - name: Build action
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Test Docker Builder Setup
+        uses: ./
+        with:
+          buildx-version: "v0.23.0"
+          nofallback: "false"
+        continue-on-error: true # Allow failure since we may not have Blacksmith env vars
+
+      - name: Verify Docker buildx
+        run: |
+          docker buildx version
+          docker buildx ls
+          
+      - name: Test Docker build
+        run: |
+          cat > Dockerfile <<EOF
+          FROM alpine:latest
+          RUN echo "Testing setup-docker-builder"
+          EOF
+          docker buildx build --platform linux/amd64 .
+        continue-on-error: true

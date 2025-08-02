@@ -1,7 +1,12 @@
 {
   "extends": "@tsconfig/node20",
   "compilerOptions": {
-    "module": "node16",
-    "noEmit": true
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true
   }
 }
