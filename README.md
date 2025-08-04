@@ -37,7 +37,7 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
 
 ```yaml
 - uses: useblacksmith/setup-docker-builder@v1
-- uses: useblacksmith/build-push-action@v1
+- uses: useblacksmith/build-push-action@v2
   with:
     push: true
     tags: user/app:latest
@@ -48,12 +48,12 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
 ```yaml
 - uses: useblacksmith/setup-docker-builder@v1
 
-- uses: useblacksmith/build-push-action@v1
+- uses: useblacksmith/build-push-action@v2
   with:
     file: ./Dockerfile.app1
     tags: user/app1:latest
 
-- uses: useblacksmith/build-push-action@v1
+- uses: useblacksmith/build-push-action@v2
   with:
     file: ./Dockerfile.app2
     tags: user/app2:latest
