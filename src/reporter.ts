@@ -27,24 +27,12 @@ const createBlacksmithAPIClient = () => {
     },
   });
 
-  (
-    axiosRetry as unknown as {
-      default: (client: unknown, options: unknown) => void;
-    }
-  ).default(client, {
+  axiosRetry(client, {
     retries: 5,
-    retryDelay: (
-      axiosRetry as unknown as {
-        exponentialDelay: (retryNumber: number) => number;
-      }
-    ).exponentialDelay,
-    retryCondition: (error: unknown) => {
+    retryDelay: axiosRetry.exponentialDelay,
+    retryCondition: (error) => {
       return (
-        (
-          axiosRetry as unknown as {
-            isNetworkOrIdempotentRequestError: (error: unknown) => boolean;
-          }
-        ).isNetworkOrIdempotentRequestError(error) ||
+        axiosRetry.isNetworkOrIdempotentRequestError(error) ||
         ((error as { response?: { status?: number } }).response?.status
           ? (error as { response: { status: number } }).response.status >= 500
           : false)
