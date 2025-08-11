@@ -338,7 +338,7 @@ void actionsToolkit.run(
           // pgrep returns exit code 1 when no process found, which is OK
           if ((error as { code?: number }).code !== 1) {
             throw new Error(
-              `Failed to check/shutdown buildkitd: ${(error as Error).message}`,
+              `failed to check/shutdown buildkitd: ${(error as Error).message}`,
             );
           }
           core.debug("No buildkitd process found (pgrep returned 1)");
