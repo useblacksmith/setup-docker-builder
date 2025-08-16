@@ -33,7 +33,6 @@ export interface Inputs {
   platforms: string[];
   nofallback: boolean;
   "github-token": string;
-  "driver-opts": string[];
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -42,7 +41,6 @@ async function getInputs(): Promise<Inputs> {
     platforms: Util.getInputList("platforms"),
     nofallback: core.getBooleanInput("nofallback"),
     "github-token": core.getInput("github-token"),
-    "driver-opts": Util.getInputList("driver-opts"),
   };
 }
 
@@ -226,16 +224,6 @@ void actionsToolkit.run(
 
         // Create the builder with platform configuration
         const createArgs = ["create", "--name", name, "--driver", "remote"];
-
-        // Add driver-specific options if provided
-        if (inputs["driver-opts"] && inputs["driver-opts"].length > 0) {
-          for (const opt of inputs["driver-opts"]) {
-            createArgs.push("--driver-opt", opt);
-          }
-          core.info(
-            `Adding driver options: ${inputs["driver-opts"].join(", ")}`,
-          );
-        }
 
         // Add platform flag - use user-supplied platforms or fallback to host arch
         const platformFlag = resolveRemoteBuilderPlatforms(inputs.platforms);

@@ -19,9 +19,6 @@ inputs:
   github-token:
     description: "GitHub token for GitHub API access"
     required: false
-  driver-opts:
-    description: "List of additional driver-specific options (e.g., env.var=value)"
-    required: false
 runs:
   using: node20
   main: dist/index.js
