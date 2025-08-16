@@ -18,6 +18,10 @@ import {
   getNumCPUs,
   pruneBuildkitCache,
 } from "./setup_builder";
+import {
+  installBuildKit,
+  isBuildKitVersionInstalled,
+} from "./buildkit-installer";
 import { shutdownBuildkitd } from "./shutdown";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
@@ -30,6 +34,7 @@ const execAsync = promisify(exec);
 // Minimal inputs interface for setup-docker-builder
 export interface Inputs {
   "buildx-version": string;
+  "buildkit-version": string;
   platforms: string[];
   nofallback: boolean;
   "github-token": string;
@@ -38,6 +43,7 @@ export interface Inputs {
 async function getInputs(): Promise<Inputs> {
   return {
     "buildx-version": core.getInput("buildx-version"),
+    "buildkit-version": core.getInput("buildkit-version"),
     platforms: Util.getInputList("platforms"),
     nofallback: core.getBooleanInput("nofallback"),
     "github-token": core.getInput("github-token"),
@@ -120,12 +126,31 @@ async function startBlacksmithBuilder(
       stickyDiskDurationMs,
     );
 
+    // Install BuildKit if version specified
+    let buildkitdPath: string | undefined;
+    if (inputs["buildkit-version"]) {
+      const version = inputs["buildkit-version"];
+
+      // Check if the requested version is already installed
+      const isInstalled = await isBuildKitVersionInstalled(version);
+
+      if (!isInstalled) {
+        core.info(`Installing BuildKit ${version}...`);
+        buildkitdPath = await installBuildKit(version);
+      } else {
+        core.info(`Using existing BuildKit ${version}`);
+      }
+    }
+
     // Get CPU count for parallelism
     const parallelism = await getNumCPUs();
 
     // Start buildkitd
     const buildkitdStartTime = Date.now();
-    const buildkitdAddr = await startAndConfigureBuildkitd(parallelism);
+    const buildkitdAddr = await startAndConfigureBuildkitd(
+      parallelism,
+      buildkitdPath,
+    );
     const buildkitdDurationMs = Date.now() - buildkitdStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,

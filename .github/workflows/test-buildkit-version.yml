@@ -1,0 +1,107 @@
+name: Test BuildKit Version
+
+on:
+  push:
+    branches: ["adityamaru/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      buildkit-version:
+        description: "BuildKit version to test (e.g., v0.16.0)"
+        required: false
+        default: "v0.16.0"
+
+jobs:
+  test-buildkit-version:
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    name: Test Custom BuildKit Version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check system BuildKit version
+        run: |
+          echo "=== System BuildKit version before custom install ==="
+          buildkitd --version || echo "BuildKit not installed"
+
+      - name: Setup Docker Builder with BuildKit v0.16.0
+        uses: ./
+        with:
+          buildkit-version: "v0.16.0"
+
+      - name: Verify BuildKit version
+        run: |
+          echo "=== BuildKit version after setup ==="
+          /usr/local/bin/buildkitd --version || buildkitd --version
+
+          echo "=== Check running buildkitd process ==="
+          ps aux | grep buildkitd | grep -v grep || true
+
+      - name: Verify builder configuration
+        run: |
+          docker buildx ls
+          docker buildx inspect --bootstrap
+
+      - name: Test build with custom BuildKit
+        run: |
+          cat > Dockerfile.test << 'EOF'
+          FROM alpine:latest
+          RUN echo "Testing with custom BuildKit version"
+          RUN echo "Build successful with BuildKit v0.16.0"
+          EOF
+
+          docker buildx build -f Dockerfile.test -t test:latest .
+
+  test-different-buildkit-version:
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    name: Test Different BuildKit Version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder with BuildKit v0.18.0
+        uses: ./
+        with:
+          buildkit-version: "v0.18.0"
+
+      - name: Verify BuildKit v0.18.0
+        run: |
+          echo "=== Verifying BuildKit v0.18.0 ==="
+          /usr/local/bin/buildkitd --version || buildkitd --version
+
+      - name: Test build
+        run: |
+          cat > Dockerfile.test << 'EOF'
+          FROM alpine:latest
+          RUN echo "Testing with BuildKit v0.18.0"
+          EOF
+
+          docker buildx build -f Dockerfile.test -t test:latest .
+
+  test-without-buildkit-version:
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    name: Test Without BuildKit Version (Uses System Default)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder without buildkit-version
+        uses: ./
+
+      - name: Verify system BuildKit is used
+        run: |
+          echo "=== Using system default BuildKit ==="
+          buildkitd --version || echo "BuildKit version not available"
+
+          docker buildx ls
+          docker buildx inspect --bootstrap
+
+      - name: Test build with system BuildKit
+        run: |
+          cat > Dockerfile.test << 'EOF'
+          FROM alpine:latest
+          RUN echo "Testing with system default BuildKit"
+          EOF
+
+          docker buildx build -f Dockerfile.test -t test:latest .
