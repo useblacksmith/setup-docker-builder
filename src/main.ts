@@ -139,6 +139,8 @@ async function startBlacksmithBuilder(
         buildkitdPath = await installBuildKit(version);
       } else {
         core.info(`Using existing BuildKit ${version}`);
+        // Use the installed version from /usr/local/bin
+        buildkitdPath = "/usr/local/bin/buildkitd";
       }
     }
 
