@@ -113,6 +113,7 @@ async function writeBuildkitdTomlFile(
 export async function startBuildkitd(
   parallelism: number,
   addr: string,
+  buildkitdPath?: string,
 ): Promise<string> {
   try {
     await writeBuildkitdTomlFile(parallelism, addr);
@@ -122,8 +123,9 @@ export async function startBuildkitd(
       flags: "a",
     });
     // Start buildkitd in background (detached) mode since we're only setting up
-    const buildkitdCommand =
-      "nohup sudo buildkitd --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &";
+    // Use custom buildkitd path if provided, otherwise use system buildkitd
+    const buildkitdBinary = buildkitdPath || "buildkitd";
+    const buildkitdCommand = `nohup sudo ${buildkitdBinary} --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &`;
     const buildkitd = execa(buildkitdCommand, {
       shell: "/bin/bash",
       stdio: ["ignore", "pipe", "pipe"],
@@ -224,11 +226,12 @@ const buildkitdTimeoutMs = 30000;
 
 export async function startAndConfigureBuildkitd(
   parallelism: number,
+  buildkitdPath?: string,
 ): Promise<string> {
   // Use standard buildkitd address
   const buildkitdAddr = BUILDKIT_DAEMON_ADDR;
 
-  const addr = await startBuildkitd(parallelism, buildkitdAddr);
+  const addr = await startBuildkitd(parallelism, buildkitdAddr, buildkitdPath);
   core.debug(`buildkitd daemon started at addr ${addr}`);
 
   // Check that buildkit instance is ready by querying workers for up to 30s

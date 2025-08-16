@@ -19,6 +19,9 @@ inputs:
   github-token:
     description: "GitHub token for GitHub API access"
     required: false
+  buildkit-version:
+    description: "BuildKit version to install (e.g., v0.16.0, v0.18.0). If not specified, uses system default"
+    required: false
 runs:
   using: node20
   main: dist/index.js
