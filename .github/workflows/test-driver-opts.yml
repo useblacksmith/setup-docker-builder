@@ -1,0 +1,150 @@
+name: Test Driver Options
+
+on:
+  push:
+    branches: [main, "adityamaru/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      driver-opts:
+        description: "Driver options to test (comma-separated)"
+        required: false
+        default: ""
+
+jobs:
+  test-basic-driver-opts:
+    runs-on: ubuntu-latest
+    name: Test Basic Driver Options
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder with driver-opts
+        uses: ./
+        with:
+          driver-opts: |
+            env.TEST_VAR=value1
+            env.ANOTHER_VAR=value2
+
+      - name: Verify builder configuration
+        run: |
+          echo "=== Docker buildx version ==="
+          docker buildx version
+
+          echo "=== Docker buildx ls ==="
+          docker buildx ls
+
+          echo "=== Docker buildx inspect ==="
+          docker buildx inspect
+
+          echo "=== Current builder ==="
+          docker buildx inspect --bootstrap
+
+      - name: Test build with configured builder
+        run: |
+          cat > Dockerfile.test << 'EOF'
+          FROM alpine:latest
+          RUN echo "Testing driver opts configuration"
+          RUN echo "Build successful"
+          EOF
+
+          docker buildx build -f Dockerfile.test --platform linux/amd64 -t test-image:latest .
+
+  test-custom-driver-opts:
+    runs-on: ubuntu-latest
+    name: Test Custom Driver Options
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.driver-opts != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder with custom driver-opts
+        uses: ./
+        with:
+          driver-opts: ${{ github.event.inputs.driver-opts }}
+
+      - name: Verify builder configuration
+        run: |
+          echo "=== Testing with custom driver-opts: ${{ github.event.inputs.driver-opts }} ==="
+          docker buildx ls
+          docker buildx inspect --bootstrap
+
+  test-multiple-driver-opts:
+    runs-on: ubuntu-latest
+    name: Test Multiple Driver Options
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder with multiple driver-opts
+        uses: ./
+        with:
+          driver-opts: |
+            env.BUILD_ENV=production
+            env.CACHE_SIZE=10gb
+            env.LOG_LEVEL=debug
+
+      - name: Verify builder configuration
+        run: |
+          echo "=== Docker buildx inspect ==="
+          docker buildx inspect --bootstrap
+
+      - name: Test multi-platform build
+        run: |
+          cat > Dockerfile.multiplatform << 'EOF'
+          FROM --platform=$BUILDPLATFORM alpine:latest AS builder
+          ARG TARGETPLATFORM
+          ARG BUILDPLATFORM
+          RUN echo "Building on $BUILDPLATFORM for $TARGETPLATFORM"
+
+          FROM alpine:latest
+          RUN echo "Multi-platform build test"
+          EOF
+
+          docker buildx build -f Dockerfile.multiplatform --platform linux/amd64,linux/arm64 -t test-multiplatform:latest .
+
+  test-no-driver-opts:
+    runs-on: ubuntu-latest
+    name: Test Without Driver Options (Backwards Compatibility)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder without driver-opts
+        uses: ./
+
+      - name: Verify builder works without driver-opts
+        run: |
+          echo "=== Testing backwards compatibility ==="
+          docker buildx ls
+          docker buildx inspect --bootstrap
+
+      - name: Test build without driver-opts
+        run: |
+          cat > Dockerfile.simple << 'EOF'
+          FROM alpine:latest
+          RUN echo "Testing without driver opts"
+          EOF
+
+          docker buildx build -f Dockerfile.simple -t test-simple:latest .
+
+  test-with-fallback:
+    runs-on: ubuntu-latest
+    name: Test Driver Options with Fallback Behavior
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Builder with driver-opts and nofallback=false
+        uses: ./
+        with:
+          driver-opts: |
+            env.TEST_OPT=value
+          nofallback: false
+
+      - name: Verify builder configuration
+        run: |
+          echo "=== Testing with fallback enabled ==="
+          docker buildx ls
+          docker buildx inspect

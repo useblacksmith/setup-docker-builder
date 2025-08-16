@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "adityamaru/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build and Test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: Integration Test
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test action with driver-opts
+        uses: ./
+        with:
+          driver-opts: |
+            env.CI_TEST=true
+            env.BUILD_ID=${{ github.run_id }}
+
+      - name: Verify builder is configured
+        run: |
+          docker buildx ls
+          docker buildx inspect --bootstrap
+
+      - name: Test simple build
+        run: |
+          cat > Dockerfile << 'EOF'
+          FROM alpine:latest
+          RUN echo "CI test successful"
+          EOF
+
+          docker buildx build -t ci-test:latest .

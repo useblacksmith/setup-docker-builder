@@ -20,6 +20,7 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
     platforms: "linux/amd64,linux/arm64" # optional
     nofallback: "false" # optional, defaults to false
     github-token: ${{ secrets.GITHUB_TOKEN }} # optional
+    driver-opts: "env.var=value,env.another=value2" # optional
 ```
 
 ## Inputs
@@ -30,6 +31,7 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
 | `platforms`      | List of target platforms for build (e.g., linux/amd64,linux/arm64) | No       |           |
 | `nofallback`     | If true, fail the action if Blacksmith builder setup fails         | No       | `false`   |
 | `github-token`   | GitHub token for GitHub API access                                 | No       |           |
+| `driver-opts`    | List of additional driver-specific options (comma-separated)       | No       |           |
 
 ## Example Workflows
 
