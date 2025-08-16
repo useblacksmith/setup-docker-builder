@@ -18,7 +18,7 @@ jobs:
     name: Test Custom BuildKit Version
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check system BuildKit version
         run: |
@@ -58,7 +58,7 @@ jobs:
     name: Test Different BuildKit Version
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Docker Builder with BuildKit v0.18.0
         uses: ./
@@ -84,7 +84,7 @@ jobs:
     name: Test Without BuildKit Version (Uses System Default)
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Docker Builder without buildkit-version
         uses: ./
