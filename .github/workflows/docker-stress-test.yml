@@ -1,0 +1,465 @@
+name: Docker Build Stress Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: 'Push images to registry'
+        required: false
+        default: 'false'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Basic setup with minimal configuration
+  basic-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: test/basic:latest
+
+  # Job 2: Setup with custom buildx configuration
+  custom-buildx-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx with custom config
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
+          driver: docker-container
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+          buildkitd-flags: --debug
+          install: true
+          use: true
+          endpoint: unix:///var/run/docker.sock
+          config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+
+      - name: Build with build args and secrets
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: |
+            test/custom:latest
+            test/custom:${{ github.sha }}
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            ENV=production
+          secrets: |
+            GIT_AUTH_TOKEN=${{ github.token }}
+
+  # Job 3: Multi-platform build with cache
+  multi-platform-cached:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
+      - name: Build multi-platform with cache
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: false
+          tags: test/multiplatform:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/image.tar
+
+  # Job 4: Registry authentication and push
+  registry-push:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.push_image == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push with metadata
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: |
+            org.opencontainers.image.description=Stress test image
+            org.opencontainers.image.vendor=TestVendor
+
+  # Job 5: Advanced caching strategies
+  advanced-caching:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+
+      - name: Build with multiple cache sources
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: test/cached:latest
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+            type=local,src=/tmp/.buildx-cache
+          cache-to: |
+            type=gha,mode=max
+            type=inline
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          target: production
+          no-cache-filters: frontend
+
+  # Job 6: Build with custom outputs and attestations
+  custom-outputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+          driver: docker-container
+          
+      - name: Build with SBOM and provenance
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: test/sbom:latest
+          outputs: |
+            type=local,dest=./output
+            type=oci,dest=./image.tar
+            type=docker,dest=./docker-image.tar
+          sbom: true
+          provenance: mode=max
+          attests: |
+            type=provenance,mode=max
+            type=sbom
+
+  # Job 7: Matrix strategy with different configurations
+  matrix-builds:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04]
+        buildx-version: [latest, v0.11.0]
+        include:
+          - os: ubuntu-latest
+            buildx-version: latest
+            driver: docker-container
+          - os: ubuntu-22.04
+            buildx-version: v0.11.0
+            driver: docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: ${{ matrix.buildx-version }}
+          driver: ${{ matrix.driver }}
+
+      - name: Build with matrix config
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: test/matrix:${{ matrix.os }}-${{ matrix.buildx-version }}
+          load: true
+          network: host
+
+  # Job 8: Using buildx action with bake
+  bake-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create docker-bake.hcl
+        run: |
+          cat > docker-bake.hcl <<EOF
+          target "default" {
+            context = "."
+            dockerfile = "Dockerfile"
+            tags = ["test/bake:latest"]
+          }
+          
+          target "production" {
+            inherits = ["default"]
+            tags = ["test/bake:prod"]
+            args = {
+              ENV = "production"
+            }
+          }
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Build with bake
+        uses: docker/bake-action@v4
+        with:
+          targets: |
+            default
+            production
+          push: false
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
+
+  # Job 9: Complex build with all options
+  kitchen-sink:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
+          driver: docker-container
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=50000000
+            env.BUILDKIT_STEP_LOG_MAX_SPEED=10000000
+          buildkitd-flags: --debug --allow-insecure-entitlement security.insecure
+          install: true
+          use: true
+          endpoint: unix:///var/run/docker.sock
+          platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7,linux/arm/v6
+          config-inline: |
+            [worker.oci]
+              max-parallelism = 4
+
+      - name: Build with everything
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          load: false
+          tags: |
+            test/kitchen-sink:latest
+            test/kitchen-sink:${{ github.sha }}
+            test/kitchen-sink:${{ github.run_number }}
+          labels: |
+            org.opencontainers.image.title=Kitchen Sink
+            org.opencontainers.image.description=All options test
+            org.opencontainers.image.version=${{ github.sha }}
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          build-contexts: |
+            nginx:docker-image://nginx:alpine
+            local:context=./src
+          secrets: |
+            id=mysecret,src=${{ github.token }}
+            id=aws,env=AWS_SECRET_ACCESS_KEY
+          secret-files: |
+            id=secret-file,src=./secret.txt
+          ssh: |
+            default=${{ env.SSH_AUTH_SOCK }}
+          cache-from: |
+            type=gha
+            type=local,src=/tmp/.buildx-cache
+            type=registry,ref=user/app:buildcache
+            type=s3,region=us-east-1,bucket=my-bucket,name=my-cache
+          cache-to: |
+            type=gha,mode=max
+            type=local,dest=/tmp/.buildx-cache-new,mode=max
+            type=inline
+          target: production
+          allow: |
+            security.insecure
+            network.host
+          outputs: |
+            type=image,push=false
+            type=local,dest=./output
+          ulimit: |
+            nofile=1024:1024
+            nproc=3
+          shm-size: 2g
+          network: host
+          no-cache: false
+          no-cache-filters: |
+            frontend
+            backend
+          pull: true
+          github-token: ${{ github.token }}
+          sbom: true
+          provenance: mode=max
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker/scout-sbom-indexer@v1
+
+  # Job 10: Setup buildx with append mode
+  append-builder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up first builder
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          endpoint: unix:///var/run/docker.sock
+
+      - name: Append to builder
+        uses: docker/setup-buildx-action@v3
+        with:
+          append: |
+            - endpoint: ssh://user@remote-host
+              platforms: linux/arm64,linux/arm/v7
+
+      - name: Build with appended builder
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: test/append:latest
+
+  # Job 11: Build and push with different registries
+  multi-registry:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.push_image == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to AWS ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Build and push to multiple registries
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event.inputs.push_image == 'true' }}
+          tags: |
+            user/app:latest
+            ghcr.io/${{ github.repository }}:latest
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/app:latest
+
+  # Job 12: Simple build followed by separate build action
+  sequential-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: First build - base image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: base
+          tags: test/base:latest
+          outputs: type=docker
+          
+      - name: Second build - production image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          tags: test/production:latest
+          build-args: |
+            BASE_IMAGE=test/base:latest
+          outputs: type=docker
