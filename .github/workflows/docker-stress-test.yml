@@ -32,7 +32,7 @@ jobs:
 
   # Job 2: Setup with custom buildx configuration
   custom-buildx-config:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
 
   # Job 3: Multi-platform build with cache
   multi-platform-cached:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
 
   # Job 4: Registry authentication and push
   registry-push:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     if: github.event.inputs.push_image == 'true'
     steps:
       - name: Checkout
@@ -126,7 +126,7 @@ jobs:
 
   # Job 5: Advanced caching strategies
   advanced-caching:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
