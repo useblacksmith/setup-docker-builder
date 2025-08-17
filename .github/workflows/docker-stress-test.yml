@@ -15,16 +15,16 @@ env:
 jobs:
   # Job 1: Basic setup with minimal configuration
   basic-build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build image
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: false
@@ -32,29 +32,16 @@ jobs:
 
   # Job 2: Setup with custom buildx configuration
   custom-buildx-config:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx with custom config
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: latest
-          driver: docker-container
-          driver-opts: |
-            image=moby/buildkit:latest
-            network=host
-          buildkitd-flags: --debug
-          install: true
-          use: true
-          endpoint: unix:///var/run/docker.sock
-          config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with build args and secrets
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: ./Dockerfile
@@ -71,7 +58,7 @@ jobs:
 
   # Job 3: Multi-platform build with cache
   multi-platform-cached:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,13 +68,11 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build multi-platform with cache
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
@@ -99,14 +84,14 @@ jobs:
 
   # Job 4: Registry authentication and push
   registry-push:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.inputs.push_image == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -129,7 +114,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push with metadata
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: true
@@ -141,19 +126,16 @@ jobs:
 
   # Job 5: Advanced caching strategies
   advanced-caching:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:master
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with multiple cache sources
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: false
@@ -171,19 +153,15 @@ jobs:
 
   # Job 6: Build with custom outputs and attestations
   custom-outputs:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: v0.12.0
-          driver: docker-container
-          
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Build with SBOM and provenance
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: false
@@ -203,10 +181,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04]
+        os: [blacksmith-2vcpu-ubuntu-2404, ubuntu-22.04]
         buildx-version: [latest, v0.11.0]
         include:
-          - os: ubuntu-latest
+          - os: blacksmith-2vcpu-ubuntu-2404
             buildx-version: latest
             driver: docker-container
           - os: ubuntu-22.04
@@ -216,14 +194,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: ${{ matrix.buildx-version }}
-          driver: ${{ matrix.driver }}
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with matrix config
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: false
@@ -233,7 +208,7 @@ jobs:
 
   # Job 8: Using buildx action with bake
   bake-build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -256,10 +231,8 @@ jobs:
           }
           EOF
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-flags: --debug
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with bake
         uses: docker/bake-action@v4
@@ -274,7 +247,7 @@ jobs:
 
   # Job 9: Complex build with all options
   kitchen-sink:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -284,27 +257,11 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: latest
-          driver: docker-container
-          driver-opts: |
-            image=moby/buildkit:buildx-stable-1
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=50000000
-            env.BUILDKIT_STEP_LOG_MAX_SPEED=10000000
-          buildkitd-flags: --debug --allow-insecure-entitlement security.insecure
-          install: true
-          use: true
-          endpoint: unix:///var/run/docker.sock
-          platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7,linux/arm/v6
-          config-inline: |
-            [worker.oci]
-              max-parallelism = 4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with everything
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: ./Dockerfile
@@ -368,26 +325,19 @@ jobs:
 
   # Job 10: Setup buildx with append mode
   append-builder:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up first builder
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-          endpoint: unix:///var/run/docker.sock
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
-      - name: Append to builder
-        uses: docker/setup-buildx-action@v3
-        with:
-          append: |
-            - endpoint: ssh://user@remote-host
-              platforms: linux/arm64,linux/arm/v7
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build with appended builder
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: false
@@ -395,14 +345,14 @@ jobs:
 
   # Job 11: Build and push with different registries
   multi-registry:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.inputs.push_image == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -425,7 +375,7 @@ jobs:
           password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Build and push to multiple registries
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           push: ${{ github.event.inputs.push_image == 'true' }}
@@ -436,18 +386,16 @@ jobs:
 
   # Job 12: Simple build followed by separate build action
   sequential-builds:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: First build - base image
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           target: base
@@ -455,7 +403,7 @@ jobs:
           outputs: type=docker
           
       - name: Second build - production image
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           target: production
