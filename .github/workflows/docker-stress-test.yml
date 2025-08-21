@@ -386,16 +386,18 @@ jobs:
 
   # Job 12: Simple build followed by separate build action
   sequential-builds:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
 
       - name: First build - base image
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           target: base
@@ -403,7 +405,7 @@ jobs:
           outputs: type=docker
           
       - name: Second build - production image
-        uses: useblacksmith/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           target: production
