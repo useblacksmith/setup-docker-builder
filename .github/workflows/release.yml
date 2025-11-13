@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,7 +46,7 @@ jobs:
           echo "Version $VERSION is available"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -84,7 +84,7 @@ jobs:
           echo "Created and pushed tag: $VERSION"
 
       - name: Update major version tag
-        if: github.event.inputs.update-major == 'true'
+        if: github.event.inputs.update-major
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
@@ -98,7 +98,7 @@ jobs:
 
           # Create and push the major version tag
           git tag -fa "$MAJOR_VERSION" -m "Update $MAJOR_VERSION to $VERSION"
-          git push origin "$MAJOR_VERSION"
+          git push --force origin "$MAJOR_VERSION"
 
           echo "Updated and pushed tag: $MAJOR_VERSION -> $VERSION"
 
@@ -108,8 +108,9 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
-          # Get the previous version tag for release notes generation
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
+          # Get the previous semver tag (v*.*.*, not v1/v2 major tags)
+          # This ensures predictable comparisons by excluding major version tags
+          PREVIOUS_TAG=$(git tag -l 'v*.*.*' --sort=-version:refname | grep -v "^$VERSION$" | head -n 1 || echo "")
 
           if [ -z "$PREVIOUS_TAG" ]; then
             echo "No previous tag found, generating notes from all commits"
