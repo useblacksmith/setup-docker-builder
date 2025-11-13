@@ -12,6 +12,8 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
 
 ## Usage
 
+### Basic Example
+
 ```yaml
 - name: Setup Docker Builder
   uses: useblacksmith/setup-docker-builder@v1
@@ -22,6 +24,27 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
     nofallback: "false" # optional, defaults to false
     github-token: ${{ secrets.GITHUB_TOKEN }} # optional
 ```
+
+### Version Pinning
+
+This action follows semantic versioning and supports multiple referencing patterns:
+
+```yaml
+# Recommended: Always get the latest compatible v1.x.x version (automatic updates for features/fixes)
+- uses: useblacksmith/setup-docker-builder@v1
+
+# Pin to exact version (no automatic updates)
+- uses: useblacksmith/setup-docker-builder@v1.1.0
+
+# Pin to specific commit SHA (maximum stability and security)
+- uses: useblacksmith/setup-docker-builder@b7dbe18
+```
+
+**Which should you use?**
+
+- **`@v1`** - Recommended for most users. Automatically receives bug fixes and new features within v1.x.x
+- **`@v1.1.0`** - Use when you need to lock to a specific version for reproducibility
+- **`@<sha>`** - Use for maximum security/stability in production environments
 
 ## Inputs
 
