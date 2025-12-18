@@ -74,6 +74,11 @@ async function writeBuildkitdTomlFile(
     grpc: {
       address: [addr],
     },
+    // Configure explicit DNS nameservers to avoid issues with systemd-resolved stub resolver.
+    // See: https://github.com/moby/buildkit/issues/5009
+    dns: {
+      nameservers: ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112"],
+    },
     registry: {
       "docker.io": {
         mirrors: ["http://192.168.127.1:5000"],
