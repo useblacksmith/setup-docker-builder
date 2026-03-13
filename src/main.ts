@@ -676,6 +676,7 @@ void actionsToolkit.run(
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
       let integrityCheckPassed: boolean | null = null;
+      let buildkitdShutdownCleanly: boolean | null = null;
 
       try {
         // Step 1: Check if buildkitd is running and shut it down
@@ -700,18 +701,22 @@ void actionsToolkit.run(
 
             // Critical: Shutdown buildkitd
             const buildkitdShutdownStartTime = Date.now();
-            await shutdownBuildkitd();
+            buildkitdShutdownCleanly = await shutdownBuildkitd();
             const buildkitdShutdownDurationMs =
               Date.now() - buildkitdShutdownStartTime;
             await reporter.reportMetric(
               Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
               buildkitdShutdownDurationMs,
             );
-            core.info("Shutdown buildkitd gracefully");
+            core.info(
+              `Shutdown buildkitd ${buildkitdShutdownCleanly ? "gracefully" : "forcefully"}`,
+            );
           } else {
             // Check if buildkitd was expected to be running (we have state indicating it was started)
             const buildkitdAddr = stateHelper.getBuildkitdAddr();
             if (buildkitdAddr) {
+              buildkitdShutdownCleanly = false;
+
               core.warning(
                 "buildkitd process has crashed - process not found but was expected to be running",
               );
@@ -729,6 +734,8 @@ void actionsToolkit.run(
                 );
               }
             } else {
+              buildkitdShutdownCleanly = true;
+
               core.debug(
                 "No buildkitd process found running and none was expected",
               );
@@ -745,6 +752,8 @@ void actionsToolkit.run(
           // Check if buildkitd was expected to be running (we have state indicating it was started)
           const buildkitdAddr = stateHelper.getBuildkitdAddr();
           if (buildkitdAddr) {
+            buildkitdShutdownCleanly = false;
+
             core.warning(
               "buildkitd process has crashed - pgrep failed but buildkitd was expected to be running",
             );
@@ -762,6 +771,8 @@ void actionsToolkit.run(
               );
             }
           } else {
+            buildkitdShutdownCleanly = true;
+
             core.debug(
               "No buildkitd process found (pgrep returned 1) and none was expected",
             );
@@ -932,9 +943,9 @@ void actionsToolkit.run(
             core.warning(
               "Skipping sticky disk commit due to previous step failures",
             );
-          } else if (stateHelper.getSigkillUsed()) {
+          } else if (!buildkitdShutdownCleanly) {
             core.warning(
-              "Skipping sticky disk commit because SIGKILL was used to terminate buildkitd - disk may be in a bad state",
+              "Skipping sticky disk commit because buildkitd did not shut down cleanly - disk may be in a bad state",
             );
           } else {
             // No failures detected and cleanup was successful

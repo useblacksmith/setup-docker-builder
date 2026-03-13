@@ -37,11 +37,3 @@ export function setBuilderName(name: string) {
 export function getBuilderName(): string {
   return core.getState("builderName");
 }
-
-export function setSigkillUsed(used: boolean) {
-  core.saveState("sigkillUsed", used.toString());
-}
-
-export function getSigkillUsed(): boolean {
-  return core.getState("sigkillUsed") === "true";
-}
