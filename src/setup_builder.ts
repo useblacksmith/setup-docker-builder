@@ -6,10 +6,9 @@ import * as TOML from "@iarna/toml";
 import * as reporter from "./reporter";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
-import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
 
 // Constants for configuration.
-const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
+export const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
 
@@ -29,10 +28,8 @@ async function maybeFormatBlockDevice(device: string): Promise<string> {
           // Run resize2fs to ensure filesystem uses full block device
           await execAsync(`sudo resize2fs -f ${device}`);
           core.debug(`Resized ext4 filesystem on ${device}`);
-        } catch (resizeError) {
-          core.warning(
-            `Error resizing ext4 filesystem on ${device}: ${(resizeError as Error).message}`,
-          );
+        } catch {
+          core.warning(`Error resizing ext4 filesystem on ${device}`);
         }
         return device;
       }
@@ -68,88 +65,14 @@ export async function getNumCPUs(): Promise<number> {
   }
 }
 
-/**
- * Configures systemd-resolved to listen on all interfaces (not just loopback)
- * so that BuildKit build containers on bridge networks can reach the DNS cache.
- *
- * By default, systemd-resolved only listens on 127.0.0.53, which is not
- * reachable from containers in their own network namespace. This adds a
- * drop-in config to make it listen on 0.0.0.0:53.
- *
- * See: https://github.com/moby/buildkit/issues/5009
- */
-async function configureSystemdResolvedForBuildkit(): Promise<void> {
-  try {
-    await execAsync(`sudo mkdir -p /etc/systemd/resolved.conf.d`);
-    await execAsync(
-      `echo '[Resolve]\nDNSStubListenerExtra=0.0.0.0' | sudo tee /etc/systemd/resolved.conf.d/buildkit-dns.conf`,
-    );
-    await execAsync(`sudo systemctl restart systemd-resolved`);
-    core.info(
-      "Configured systemd-resolved to listen on all interfaces for BuildKit DNS caching",
-    );
-  } catch (error) {
-    core.warning(
-      `Failed to configure systemd-resolved: ${(error as Error).message}`,
-    );
-  }
-}
-
-/**
- * Gets the host's primary routable IP address, which is reachable from
- * BuildKit build containers on any network mode (host, bridge, custom).
- *
- * Falls back to public DNS servers if the routable IP cannot be determined.
- */
-async function getRoutableHostDns(): Promise<string[]> {
-  // Public DNS fallback in case we can't determine the host's routable IP
-  const publicDnsFallback = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"];
-
-  try {
-    // Get the host's source IP for internet-bound traffic
-    const { stdout } = await execAsync(
-      `ip route get 1.1.1.1 | grep -oP 'src \\K[0-9.]+'`,
-    );
-    const hostIp = stdout.trim();
-
-    if (hostIp && hostIp !== "127.0.0.53") {
-      core.info(
-        `Using host routable IP ${hostIp} as sole DNS nameserver for BuildKit (systemd-resolved cache)`,
-      );
-      // Only use the host IP (backed by systemd-resolved cache).
-      // Do NOT include public DNS fallbacks — BuildKit round-robins across
-      // all nameservers rather than using them as ordered fallbacks, which
-      // would bypass the cache for ~50% of queries and defeat the purpose.
-      // systemd-resolved itself already has upstream fallback configured.
-      return [hostIp];
-    }
-  } catch (error) {
-    core.warning(
-      `Failed to determine host routable IP: ${(error as Error).message}`,
-    );
-  }
-
-  core.info("Falling back to public DNS nameservers (no local cache)");
-  return publicDnsFallback;
-}
-
 async function writeBuildkitdTomlFile(
   parallelism: number,
   addr: string,
-  dnsNameservers: string[],
 ): Promise<void> {
   const jsonConfig: TOML.JsonMap = {
     root: "/var/lib/buildkit",
     grpc: {
       address: [addr],
-    },
-    // Point BuildKit at the host's systemd-resolved cache via a routable IP.
-    // This avoids the known issue where BuildKit falls back to hardcoded public DNS
-    // (8.8.8.8/8.8.4.4) because it can't use the 127.0.0.53 stub resolver from
-    // containers in separate network namespaces.
-    // See: https://github.com/moby/buildkit/issues/5009
-    dns: {
-      nameservers: dnsNameservers,
     },
     registry: {
       "docker.io": {
@@ -195,11 +118,7 @@ export async function startBuildkitd(
   driverOpts?: string[],
 ): Promise<string> {
   try {
-    // Configure systemd-resolved to listen on a routable address so BuildKit
-    // build containers can use the host's DNS cache from any network namespace.
-    await configureSystemdResolvedForBuildkit();
-    const dnsNameservers = await getRoutableHostDns();
-    await writeBuildkitdTomlFile(parallelism, addr, dnsNameservers);
+    await writeBuildkitdTomlFile(parallelism, addr);
 
     // Parse driver-opts to extract environment variables
     const envVars: Record<string, string> = {};
@@ -479,24 +398,6 @@ export async function logDatabaseHashes(label: string): Promise<void> {
 
   for (const filePath of dbFiles) {
     try {
-      // Check file size before attempting hash — skip large files that would
-      // timeout or consume excessive I/O.
-      try {
-        const { stdout: sizeOutput } = await execAsync(
-          `stat -c%s "${filePath}" 2>/dev/null || stat -f%z "${filePath}"`,
-        );
-        const sizeBytes = parseInt(sizeOutput.trim(), 10);
-        if (!isNaN(sizeBytes) && sizeBytes > BOLT_CHECK_MAX_FILE_BYTES) {
-          const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
-          core.info(
-            `  ${filePath}: skipping hash (${sizeMB} MB exceeds ${BOLT_CHECK_MAX_FILE_BYTES / (1024 * 1024)} MB limit)`,
-          );
-          continue;
-        }
-      } catch {
-        // If stat fails, still attempt the hash — md5sum will fail with a clear error
-      }
-
       // Use timeout and md5sum to offload computation, avoiding reading file in Node.js
       const { stdout } = await execAsync(
         `timeout 5s sudo md5sum "${filePath}"`,
