@@ -33,6 +33,6 @@ inputs:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
 runs:
-  using: node22
+  using: node24
   main: dist/index.js
   post: dist/index.js
