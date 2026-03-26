@@ -29,7 +29,7 @@
     "@eslint/js": "^9.29.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.4",
-    "@tsconfig/node20": "^20.1.6",
+    "@tsconfig/node22": "^22.0.0",
     "@types/iarna__toml": "^2.0.5",
     "@types/node": "^24.1.0",
     "@vercel/ncc": "^0.38.3",
