@@ -428,6 +428,24 @@ async function startBlacksmithBuilder(
   inputs: Inputs,
 ): Promise<{ addr: string | null; exposeId: string }> {
   try {
+    // If buildkitd is already running, skip - the builder is already initialized.
+    try {
+      const { stdout } = await execAsync("pgrep buildkitd");
+      if (stdout.trim()) {
+        core.info(
+          `Detected existing buildkitd process (PID: ${stdout.trim()}). ` +
+            `Skipping builder setup - builder is already initialized.`,
+        );
+        return { addr: null, exposeId: "" };
+      }
+    } catch (error) {
+      if ((error as { code?: number }).code !== 1) {
+        throw new Error(
+          `Failed to check for existing buildkitd process: ${(error as Error).message}`,
+        );
+      }
+    }
+
     // Setup sticky disk
     const stickyDiskStartTime = Date.now();
     const stickyDiskSetup = await setupStickyDisk();
@@ -462,25 +480,6 @@ async function startBlacksmithBuilder(
         `Overriding max-parallelism from ${parallelism} (nproc) to ${inputs["max-parallelism"]} (user-specified)`,
       );
       parallelism = inputs["max-parallelism"];
-    }
-
-    // Check if buildkitd is already running before starting
-    try {
-      const { stdout } = await execAsync("pgrep buildkitd");
-      if (stdout.trim()) {
-        throw new Error(
-          `Detected existing buildkitd process (PID: ${stdout.trim()}). Refusing to start to avoid conflicts.`,
-        );
-      }
-    } catch (error) {
-      if ((error as { code?: number }).code !== 1) {
-        // pgrep returns exit code 1 when no process found, which is what we want
-        // Any other error code indicates a real problem
-        throw new Error(
-          `Failed to check for existing buildkitd process: ${(error as Error).message}`,
-        );
-      }
-      // Exit code 1 means no buildkitd process found, which is good - we can proceed
     }
 
     // Check for potential boltdb corruption
@@ -520,6 +519,84 @@ async function startBlacksmithBuilder(
       `Error during Blacksmith builder setup: ${(error as Error).message}. Falling back to local builder.`,
     );
     return { addr: null, exposeId: "" };
+  }
+}
+
+/**
+ * Shuts down buildkitd only if this action instance started it.
+ * When setup is called multiple times in one job, only the first
+ * instance starts buildkitd; subsequent instances reuse it and
+ * should not shut it down.
+ */
+async function maybeShutdownBuildkitd(): Promise<void> {
+  const buildkitdAddr = stateHelper.getBuildkitdAddr();
+  if (!buildkitdAddr) {
+    core.info("This instance did not start buildkitd, skipping shutdown");
+    return;
+  }
+
+  core.info(`buildkitd addr: ${buildkitdAddr}`);
+
+  let pid: string | null = null;
+  try {
+    const { stdout } = await execAsync("pgrep buildkitd");
+    pid = stdout.trim() || null;
+  } catch (error) {
+    if ((error as { code?: number }).code !== 1) {
+      throw new Error(
+        `failed to check buildkitd status: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  if (!pid) {
+    core.warning(
+      "buildkitd process has crashed - expected to be running but not found",
+    );
+    await logBuildkitdCrashLogs();
+    return;
+  }
+
+  core.info(`buildkitd process: ${pid}`);
+
+  try {
+    core.info("Pruning BuildKit cache");
+    await pruneBuildkitCache();
+    core.info("BuildKit cache pruned");
+  } catch (error) {
+    core.warning(
+      `Error pruning BuildKit cache: ${(error as Error).message}`,
+    );
+  }
+
+  const buildkitdShutdownStartTime = Date.now();
+  await shutdownBuildkitd();
+  const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
+  await reporter.reportMetric(
+    Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
+    buildkitdShutdownDurationMs,
+  );
+
+  if (stateHelper.getSigkillUsed()) {
+    core.warning(
+      "buildkitd was terminated with SIGKILL after graceful shutdown failed",
+    );
+  } else {
+    core.info("Shutdown buildkitd gracefully");
+  }
+}
+
+async function logBuildkitdCrashLogs(): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
+    );
+    core.info("Last 100 lines of buildkitd.log:");
+    core.info(stdout);
+  } catch (error) {
+    core.warning(
+      `Could not read buildkitd logs: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -640,7 +717,9 @@ void actionsToolkit.run(
       });
     } else {
       // Fallback to local builder
-      core.warning("Failed to setup Blacksmith builder, using local builder");
+      core.warning(
+        "Blacksmith builder setup skipped or failed, checking for existing configured builder",
+      );
       await core.group(`Checking for configured builder`, async () => {
         try {
           const builder = await toolkit.builder.inspect();
@@ -678,99 +757,11 @@ void actionsToolkit.run(
       let integrityCheckPassed: boolean | null = null;
 
       try {
-        // Step 1: Check if buildkitd is running and shut it down
-        try {
-          core.info(`buildkitd addr: ${stateHelper.getBuildkitdAddr()}`);
-          const { stdout } = await execAsync("pgrep buildkitd");
-          core.info(`buildkitd process: ${stdout.trim()}`);
-          if (stdout.trim()) {
-            core.info("buildkitd process is running");
-
-            // Optional: Prune cache before shutdown (non-critical)
-            try {
-              core.info("Pruning BuildKit cache");
-              await pruneBuildkitCache();
-              core.info("BuildKit cache pruned");
-            } catch (error) {
-              core.warning(
-                `Error pruning BuildKit cache: ${(error as Error).message}`,
-              );
-              // Don't fail cleanup for cache prune errors
-            }
-
-            // Critical: Shutdown buildkitd
-            const buildkitdShutdownStartTime = Date.now();
-            await shutdownBuildkitd();
-            const buildkitdShutdownDurationMs =
-              Date.now() - buildkitdShutdownStartTime;
-            await reporter.reportMetric(
-              Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
-              buildkitdShutdownDurationMs,
-            );
-            if (stateHelper.getSigkillUsed()) {
-              core.warning("buildkitd was terminated with SIGKILL after graceful shutdown failed");
-            } else {
-              core.info("Shutdown buildkitd gracefully");
-            }
-          } else {
-            // Check if buildkitd was expected to be running (we have state indicating it was started)
-            const buildkitdAddr = stateHelper.getBuildkitdAddr();
-            if (buildkitdAddr) {
-              core.warning(
-                "buildkitd process has crashed - process not found but was expected to be running",
-              );
-
-              // Print tail of buildkitd logs to help debug the crash
-              try {
-                const { stdout: logOutput } = await execAsync(
-                  "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
-                );
-                core.info("Last 100 lines of buildkitd.log:");
-                core.info(logOutput);
-              } catch (error) {
-                core.warning(
-                  `Could not read buildkitd logs: ${(error as Error).message}`,
-                );
-              }
-            } else {
-              core.debug(
-                "No buildkitd process found running and none was expected",
-              );
-            }
-          }
-        } catch (error) {
-          // pgrep returns exit code 1 when no process found, which is OK
-          if ((error as { code?: number }).code !== 1) {
-            throw new Error(
-              `failed to check/shutdown buildkitd: ${(error as Error).message}`,
-            );
-          }
-
-          // Check if buildkitd was expected to be running (we have state indicating it was started)
-          const buildkitdAddr = stateHelper.getBuildkitdAddr();
-          if (buildkitdAddr) {
-            core.warning(
-              "buildkitd process has crashed - pgrep failed but buildkitd was expected to be running",
-            );
-
-            // Print tail of blacksmithd logs to help debug the crash
-            try {
-              const { stdout: logOutput } = await execAsync(
-                "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
-              );
-              core.info("Last 100 lines of buildkitd.log:");
-              core.info(logOutput);
-            } catch (error) {
-              core.warning(
-                `Could not read buildkitd logs: ${(error as Error).message}`,
-              );
-            }
-          } else {
-            core.debug(
-              "No buildkitd process found (pgrep returned 1) and none was expected",
-            );
-          }
-        }
+        // Step 1: Shut down buildkitd if this instance started it.
+        // When setup is called multiple times in one job, only the first
+        // instance starts buildkitd; subsequent instances reuse it and
+        // should not shut it down.
+        await maybeShutdownBuildkitd();
 
         // Step 2: Sync and unmount sticky disk
         await execAsync("sync");
