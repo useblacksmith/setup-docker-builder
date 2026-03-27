@@ -644,8 +644,8 @@ void actionsToolkit.run(
       await core.group(`Checking for configured builder`, async () => {
         try {
           const builder = await toolkit.builder.inspect();
-          if (builder) {
-            core.info(`Found configured builder: ${builder.name}`);
+          if (builder && builder.driver !== "docker") {
+            core.info(`Found configured builder: ${builder.name} (driver: ${builder.driver})`);
           } else {
             // Create a local builder
             const createLocalBuilderCmd =
