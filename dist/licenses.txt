@@ -397,10 +397,6 @@ SOFTWARE.
 @azure/storage-common
 MIT
 
-@buf/blacksmith_vm-agent.bufbuild_es
-
-@buf/blacksmith_vm-agent.connectrpc_es
-
 @bufbuild/protobuf
 (Apache-2.0 AND BSD-3-Clause)
 
