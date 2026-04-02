@@ -1,0 +1,53 @@
+name: Rebuild Dist
+
+on:
+  push:
+    branches:
+      - codesmith/add-builder-fallback-metric
+
+jobs:
+  rebuild-dist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codesmith/add-builder-fallback-metric
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.9
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Configure npm for buf registry
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          npm config set @buf:registry https://buf.build/gen/npm/v1/
+          npm config set //buf.build/gen/npm/v1/:_authToken $BUF_TOKEN
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Commit and push dist
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "build: rebuild dist"
+            git push
+          fi
