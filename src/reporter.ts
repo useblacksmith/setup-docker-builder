@@ -60,7 +60,8 @@ export async function reportBuildPushActionFailure(
     | "BUILDER_STARTUP"
     | "BUILDER_CLEANUP"
     | "STICKYDISK_SETUP"
-    | "STICKYDISK_COMMIT",
+    | "STICKYDISK_COMMIT"
+    | "BUILDER_FALLBACK",
   error?: Error,
   event?: string,
 ) {

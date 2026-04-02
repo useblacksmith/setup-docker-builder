@@ -515,6 +515,12 @@ async function startBlacksmithBuilder(
       throw error;
     }
 
+    await reporter.reportBuildPushActionFailure(
+      "BUILDER_FALLBACK",
+      error as Error,
+      "builder setup",
+    );
+
     core.warning(
       `Error during Blacksmith builder setup: ${(error as Error).message}. Falling back to local builder.`,
     );
