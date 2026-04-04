@@ -730,7 +730,7 @@ void actionsToolkit.run(
             }
           });
 
-          // Append follower node for the other architecture.
+          // Append follower node for the other architecture with mTLS.
           const appendArgs = [
             "create",
             "--name",
@@ -738,6 +738,12 @@ void actionsToolkit.run(
             "--append",
             "--driver",
             "remote",
+            "--driver-opt",
+            `cacert=${followerInfo.mtlsCerts.caCertPath}`,
+            "--driver-opt",
+            `cert=${followerInfo.mtlsCerts.clientCertPath}`,
+            "--driver-opt",
+            `key=${followerInfo.mtlsCerts.clientKeyPath}`,
             "--platform",
             `linux/${followerInfo.arch}`,
             followerInfo.buildkitdAddr,

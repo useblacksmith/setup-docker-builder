@@ -1,5 +1,7 @@
 import * as core from "@actions/core";
+import * as fs from "fs";
 import * as os from "os";
+import * as path from "path";
 import axios, { type AxiosInstance } from "axios";
 import axiosRetry from "axios-retry";
 import { promisify } from "util";
@@ -19,6 +21,16 @@ const SSH_READY_TIMEOUT_MS = 60_000;
 // Maximum time (ms) to wait for follower buildkitd to be ready.
 const BUILDKITD_READY_TIMEOUT_MS = 30_000;
 
+/** Paths to mTLS certificates used by the leader to connect to the follower. */
+export interface MTLSCerts {
+  /** Path to the ephemeral CA certificate. */
+  caCertPath: string;
+  /** Path to the client certificate (signed by the CA). */
+  clientCertPath: string;
+  /** Path to the client private key. */
+  clientKeyPath: string;
+}
+
 export interface FollowerInfo {
   /** The VM ID returned by the sandbox API. */
   vmId: string;
@@ -26,6 +38,8 @@ export interface FollowerInfo {
   buildkitdAddr: string;
   /** The architecture of the follower (e.g. "amd64", "arm64"). */
   arch: string;
+  /** mTLS certificates for securing the buildx → buildkitd connection. */
+  mtlsCerts: MTLSCerts;
 }
 
 /**
@@ -137,6 +151,71 @@ async function generateEphemeralSSHKey(): Promise<{
 }
 
 /**
+ * Generates an ephemeral mTLS certificate bundle (CA, server cert, client cert)
+ * in a temporary directory. All certs are valid for 1 hour — long enough for
+ * any build but short-lived enough to limit exposure.
+ *
+ * Returns paths to the CA cert, server cert/key, and client cert/key.
+ */
+async function generateMTLSCerts(): Promise<{
+  caCertPath: string;
+  caKeyPath: string;
+  serverCertPath: string;
+  serverKeyPath: string;
+  clientCertPath: string;
+  clientKeyPath: string;
+}> {
+  const certDir = `/tmp/blacksmith_mtls_${Date.now()}`;
+  fs.mkdirSync(certDir, { mode: 0o700 });
+
+  // Generate ephemeral CA.
+  await execAsync(
+    `openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 ` +
+      `-x509 -sha256 -days 1 -nodes ` +
+      `-keyout ${certDir}/ca.key -out ${certDir}/ca.crt ` +
+      `-subj "/CN=blacksmith-multiarch-ca"`,
+  );
+
+  // Generate server certificate (used by follower buildkitd).
+  await execAsync(
+    `openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 ` +
+      `-nodes -keyout ${certDir}/server.key -out ${certDir}/server.csr ` +
+      `-subj "/CN=blacksmith-buildkitd"`,
+  );
+  // Sign with CA — add SAN with wildcard for vm hostnames.
+  await execAsync(
+    `openssl x509 -req -in ${certDir}/server.csr ` +
+      `-CA ${certDir}/ca.crt -CAkey ${certDir}/ca.key -CAcreateserial ` +
+      `-out ${certDir}/server.crt -days 1 -sha256 ` +
+      `-extfile <(printf "subjectAltName=DNS:*.vm.blacksmith.sh,DNS:localhost,IP:127.0.0.1")`,
+    { shell: "/bin/bash" },
+  );
+
+  // Generate client certificate (used by leader buildx).
+  await execAsync(
+    `openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 ` +
+      `-nodes -keyout ${certDir}/client.key -out ${certDir}/client.csr ` +
+      `-subj "/CN=blacksmith-buildx-client"`,
+  );
+  await execAsync(
+    `openssl x509 -req -in ${certDir}/client.csr ` +
+      `-CA ${certDir}/ca.crt -CAkey ${certDir}/ca.key -CAcreateserial ` +
+      `-out ${certDir}/client.crt -days 1 -sha256`,
+  );
+
+  core.info("Generated ephemeral mTLS certificate bundle");
+
+  return {
+    caCertPath: path.join(certDir, "ca.crt"),
+    caKeyPath: path.join(certDir, "ca.key"),
+    serverCertPath: path.join(certDir, "server.crt"),
+    serverKeyPath: path.join(certDir, "server.key"),
+    clientCertPath: path.join(certDir, "client.crt"),
+    clientKeyPath: path.join(certDir, "client.key"),
+  };
+}
+
+/**
  * Spawns a follower sandbox VM on the specified architecture.
  * Returns the VM ID and SSH connection details.
  */
@@ -238,24 +317,67 @@ async function sshExec(
 }
 
 /**
- * Starts buildkitd on the follower VM via SSH and waits for it to be ready.
+ * Copies mTLS server certificates to the follower VM via SCP.
+ */
+async function pushServerCertsToFollower(
+  privateKeyPath: string,
+  host: string,
+  port: number,
+  caCertPath: string,
+  serverCertPath: string,
+  serverKeyPath: string,
+): Promise<void> {
+  core.info("Copying mTLS server certificates to follower...");
+
+  // Create cert directory on follower.
+  await sshExec(privateKeyPath, host, port, "mkdir -p /tmp/buildkitd-certs");
+
+  const scpOpts = [
+    `-i ${privateKeyPath}`,
+    `-P ${port}`,
+    "-o StrictHostKeyChecking=no",
+    "-o UserKnownHostsFile=/dev/null",
+    "-o LogLevel=ERROR",
+  ].join(" ");
+
+  for (const [localPath, remoteName] of [
+    [caCertPath, "ca.crt"],
+    [serverCertPath, "server.crt"],
+    [serverKeyPath, "server.key"],
+  ] as const) {
+    await execAsync(
+      `scp ${scpOpts} ${localPath} runner@${host}:/tmp/buildkitd-certs/${remoteName}`,
+      { timeout: 15_000 },
+    );
+  }
+
+  core.info("mTLS server certificates copied to follower");
+}
+
+/**
+ * Starts buildkitd on the follower VM via SSH with mTLS enabled, and waits
+ * for it to be ready.
  */
 async function startFollowerBuildkitd(
   privateKeyPath: string,
   host: string,
   port: number,
 ): Promise<void> {
-  core.info("Starting buildkitd on follower VM...");
+  core.info("Starting buildkitd on follower VM with mTLS...");
 
-  // Start buildkitd in the background, listening on TCP.
-  await sshExec(
-    privateKeyPath,
-    host,
-    port,
-    `nohup sudo buildkitd --addr tcp://0.0.0.0:${FOLLOWER_BUILDKITD_PORT} > /tmp/buildkitd.log 2>&1 &`,
-  );
+  // Start buildkitd with TLS flags.
+  const buildkitdCmd = [
+    "nohup sudo buildkitd",
+    `--addr tcp://0.0.0.0:${FOLLOWER_BUILDKITD_PORT}`,
+    "--tlscacert /tmp/buildkitd-certs/ca.crt",
+    "--tlscert /tmp/buildkitd-certs/server.crt",
+    "--tlskey /tmp/buildkitd-certs/server.key",
+    "> /tmp/buildkitd.log 2>&1 &",
+  ].join(" ");
 
-  // Wait for buildkitd to be ready.
+  await sshExec(privateKeyPath, host, port, buildkitdCmd);
+
+  // Wait for buildkitd to be ready (use buildctl with matching TLS certs).
   const startTime = Date.now();
   while (Date.now() - startTime < BUILDKITD_READY_TIMEOUT_MS) {
     try {
@@ -263,12 +385,17 @@ async function startFollowerBuildkitd(
         privateKeyPath,
         host,
         port,
-        `sudo buildctl --addr tcp://127.0.0.1:${FOLLOWER_BUILDKITD_PORT} debug workers 2>/dev/null`,
+        `sudo buildctl ` +
+          `--addr tcp://127.0.0.1:${FOLLOWER_BUILDKITD_PORT} ` +
+          `--tlscacert /tmp/buildkitd-certs/ca.crt ` +
+          `--tlscert /tmp/buildkitd-certs/server.crt ` +
+          `--tlskey /tmp/buildkitd-certs/server.key ` +
+          `debug workers 2>/dev/null`,
         10_000,
       );
       if (result.includes("Platforms:")) {
         core.info(
-          `Follower buildkitd ready (took ${Date.now() - startTime}ms)`,
+          `Follower buildkitd ready with mTLS (took ${Date.now() - startTime}ms)`,
         );
         return;
       }
@@ -328,17 +455,30 @@ export async function setupMultiArchFollower(
   // Step 1: Generate ephemeral SSH keypair.
   const { privateKeyPath, publicKey } = await generateEphemeralSSHKey();
 
-  // Step 2: Spawn follower sandbox.
+  // Step 2: Generate ephemeral mTLS certificates.
+  const mtls = await generateMTLSCerts();
+
+  // Step 3: Spawn follower sandbox.
   const { vmId, sshHost, sshPort } = await spawnFollowerSandbox(
     client,
     followerArch,
     publicKey,
   );
 
-  // Step 3: Start buildkitd on the follower.
+  // Step 4: Copy server certificates to follower.
+  await pushServerCertsToFollower(
+    privateKeyPath,
+    sshHost,
+    sshPort,
+    mtls.caCertPath,
+    mtls.serverCertPath,
+    mtls.serverKeyPath,
+  );
+
+  // Step 5: Start buildkitd on the follower with mTLS.
   await startFollowerBuildkitd(privateKeyPath, sshHost, sshPort);
 
-  // Step 4: Expose follower buildkitd via tunnel manager.
+  // Step 6: Expose follower buildkitd via tunnel manager.
   const buildkitdAddr = await exposeFollowerBuildkitd(
     privateKeyPath,
     sshHost,
@@ -349,6 +489,11 @@ export async function setupMultiArchFollower(
     vmId,
     buildkitdAddr,
     arch: followerArch,
+    mtlsCerts: {
+      caCertPath: mtls.caCertPath,
+      clientCertPath: mtls.clientCertPath,
+      clientKeyPath: mtls.clientKeyPath,
+    },
   };
 }
 
