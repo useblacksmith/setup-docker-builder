@@ -32,6 +32,12 @@ import {
 import { shutdownBuildkitd } from "./shutdown";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
+import {
+  getRequiredFollowerArch,
+  setupMultiArchFollower,
+  teardownFollower,
+  type FollowerInfo,
+} from "./multiarch";
 import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
@@ -564,9 +570,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
     await pruneBuildkitCache();
     core.info("BuildKit cache pruned");
   } catch (error) {
-    core.warning(
-      `Error pruning BuildKit cache: ${(error as Error).message}`,
-    );
+    core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);
   }
 
   const buildkitdShutdownStartTime = Date.now();
@@ -594,9 +598,7 @@ async function logBuildkitdCrashLogs(): Promise<void> {
     core.info("Last 100 lines of buildkitd.log:");
     core.info(stdout);
   } catch (error) {
-    core.warning(
-      `Could not read buildkitd logs: ${(error as Error).message}`,
-    );
+    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
   }
 }
 
@@ -665,35 +667,119 @@ void actionsToolkit.run(
     });
 
     if (builderInfo.addr) {
+      // Check if multi-arch follower is needed
+      let followerInfo: FollowerInfo | null = null;
+      const followerArch = getRequiredFollowerArch(inputs.platforms);
+      if (followerArch) {
+        await core.group(
+          `Setting up multi-arch follower (${followerArch})`,
+          async () => {
+            try {
+              followerInfo = await setupMultiArchFollower(followerArch);
+              stateHelper.setFollowerVmId(followerInfo.vmId);
+              stateHelper.setFollowerArch(followerInfo.arch);
+              stateHelper.setFollowerBuildkitdAddr(followerInfo.buildkitdAddr);
+              core.info(
+                `Multi-arch follower ready: arch=${followerInfo.arch} addr=${followerInfo.buildkitdAddr}`,
+              );
+            } catch (error) {
+              core.warning(
+                `Failed to set up multi-arch follower: ${(error as Error).message}. ` +
+                  `Multi-arch builds will fall back to QEMU emulation.`,
+              );
+              followerInfo = null;
+            }
+          },
+        );
+      }
+
       // Create and configure the builder
       await core.group(`Creating builder instance`, async () => {
         const name = `blacksmith-${Date.now().toString(36)}`;
         stateHelper.setBuilderName(name);
 
-        // Create the builder with platform configuration
-        const createArgs = ["create", "--name", name, "--driver", "remote"];
+        if (followerInfo) {
+          // Multi-arch: create builder with host arch node, then append follower node.
+          const hostArch = resolveRemoteBuilderPlatforms();
+          core.info(
+            `Creating multi-arch builder: host=${hostArch}, follower=linux/${followerInfo.arch}`,
+          );
 
-        // Add platform flag - use user-supplied platforms or fallback to host arch
-        const platformFlag = resolveRemoteBuilderPlatforms(inputs.platforms);
-        core.info(`Determined remote builder platform(s): ${platformFlag}`);
-        createArgs.push("--platform", platformFlag);
+          // Create first node for host architecture.
+          const createArgs = [
+            "create",
+            "--name",
+            name,
+            "--driver",
+            "remote",
+            "--platform",
+            hostArch,
+            builderInfo.addr!,
+          ];
+          const createCmd = await toolkit.buildx.getCommand(createArgs);
+          core.info(
+            `Creating host builder node: ${createCmd.command} ${createCmd.args.join(" ")}`,
+          );
+          await Exec.getExecOutput(createCmd.command, createCmd.args, {
+            ignoreReturnCode: true,
+          }).then((res) => {
+            if (res.stderr.length > 0 && res.exitCode != 0) {
+              throw new Error(
+                /(.*)\ s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
+              );
+            }
+          });
 
-        createArgs.push(builderInfo.addr!);
+          // Append follower node for the other architecture.
+          const appendArgs = [
+            "create",
+            "--name",
+            name,
+            "--append",
+            "--driver",
+            "remote",
+            "--platform",
+            `linux/${followerInfo.arch}`,
+            followerInfo.buildkitdAddr,
+          ];
+          const appendCmd = await toolkit.buildx.getCommand(appendArgs);
+          core.info(
+            `Appending follower builder node: ${appendCmd.command} ${appendCmd.args.join(" ")}`,
+          );
+          await Exec.getExecOutput(appendCmd.command, appendCmd.args, {
+            ignoreReturnCode: true,
+          }).then((res) => {
+            if (res.stderr.length > 0 && res.exitCode != 0) {
+              throw new Error(
+                /(.*)\ s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
+              );
+            }
+          });
+        } else {
+          // Single-arch: create builder with all platforms on one node.
+          const createArgs = ["create", "--name", name, "--driver", "remote"];
 
-        const createCmd = await toolkit.buildx.getCommand(createArgs);
+          const platformFlag = resolveRemoteBuilderPlatforms(inputs.platforms);
+          core.info(`Determined remote builder platform(s): ${platformFlag}`);
+          createArgs.push("--platform", platformFlag);
 
-        core.info(
-          `Creating builder with command: ${createCmd.command} ${createCmd.args.join(" ")}`,
-        );
-        await Exec.getExecOutput(createCmd.command, createCmd.args, {
-          ignoreReturnCode: true,
-        }).then((res) => {
-          if (res.stderr.length > 0 && res.exitCode != 0) {
-            throw new Error(
-              /(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
-            );
-          }
-        });
+          createArgs.push(builderInfo.addr!);
+
+          const createCmd = await toolkit.buildx.getCommand(createArgs);
+
+          core.info(
+            `Creating builder with command: ${createCmd.command} ${createCmd.args.join(" ")}`,
+          );
+          await Exec.getExecOutput(createCmd.command, createCmd.args, {
+            ignoreReturnCode: true,
+          }).then((res) => {
+            if (res.stderr.length > 0 && res.exitCode != 0) {
+              throw new Error(
+                /(.*)\ s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
+              );
+            }
+          });
+        }
 
         // Set as default builder
         const useCmd = await toolkit.buildx.getCommand(["use", name]);
@@ -703,7 +789,7 @@ void actionsToolkit.run(
         }).then((res) => {
           if (res.stderr.length > 0 && res.exitCode != 0) {
             throw new Error(
-              /(.*)\s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
+              /(.*)\ s*$/.exec(res.stderr)?.[0]?.trim() ?? "unknown error",
             );
           }
         });
@@ -724,7 +810,9 @@ void actionsToolkit.run(
         try {
           const builder = await toolkit.builder.inspect();
           if (builder && builder.driver !== "docker") {
-            core.info(`Found configured builder: ${builder.name} (driver: ${builder.driver})`);
+            core.info(
+              `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
+            );
           } else {
             // Create a local builder
             const createLocalBuilderCmd =
@@ -750,6 +838,14 @@ void actionsToolkit.run(
   },
   // post action - cleanup
   async () => {
+    // Clean up follower sandbox if one was created.
+    const followerVmId = stateHelper.getFollowerVmId();
+    if (followerVmId) {
+      await core.group("Cleaning up multi-arch follower sandbox", async () => {
+        await teardownFollower(followerVmId);
+      });
+    }
+
     await core.group("Cleaning up Docker builder", async () => {
       const exposeId = stateHelper.getExposeId();
       let cleanupError: Error | null = null;

@@ -38,6 +38,30 @@ export function getBuilderName(): string {
   return core.getState("builderName");
 }
 
+export function setFollowerVmId(vmId: string) {
+  core.saveState("followerVmId", vmId);
+}
+
+export function getFollowerVmId(): string {
+  return core.getState("followerVmId");
+}
+
+export function setFollowerArch(arch: string) {
+  core.saveState("followerArch", arch);
+}
+
+export function getFollowerArch(): string {
+  return core.getState("followerArch");
+}
+
+export function setFollowerBuildkitdAddr(addr: string) {
+  core.saveState("followerBuildkitdAddr", addr);
+}
+
+export function getFollowerBuildkitdAddr(): string {
+  return core.getState("followerBuildkitdAddr");
+}
+
 let _sigkillUsed = false;
 
 export function setSigkillUsed(used: boolean) {
