@@ -167,7 +167,7 @@ async function writeBuildkitdTomlFile(
         enabled: true,
         // Disable automatic garbage collection, since we will prune manually. Automatic GC
         // has been seen to negatively affect startup times of the daemon.
-        gc: false,
+        gc: true,
         "max-parallelism": parallelism,
         snapshotter: "overlayfs",
       },
