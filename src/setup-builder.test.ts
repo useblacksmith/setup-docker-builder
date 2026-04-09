@@ -95,7 +95,8 @@ describe("setup_builder", () => {
         (cmd: string, cb: (...args: unknown[]) => void) => {
           if (cmd.includes("buildctl") && cmd.includes("du")) {
             cb(null, {
-              stdout: "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
+              stdout:
+                "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
               stderr: "",
             });
           }
@@ -154,7 +155,8 @@ describe("setup_builder", () => {
         (cmd: string, cb: (...args: unknown[]) => void) => {
           if (cmd.includes("buildctl") && cmd.includes("prune")) {
             cb(null, {
-              stdout: "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
+              stdout:
+                "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
               stderr: "",
             });
           }

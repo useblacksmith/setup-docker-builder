@@ -3,7 +3,7 @@
   "description": "Setup Docker buildkitd builder with sticky disk cache",
   "private": true,
   "engines": {
-    "pnpm": "8.15.9"
+    "pnpm": "10.33.0"
   },
   "scripts": {
     "build": "ncc build src/main.ts -o dist --source-map --minify --license licenses.txt",
@@ -24,6 +24,11 @@
     "axios": "^1.7.2",
     "axios-retry": "^4.5.0",
     "execa": "^9.5.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@bufbuild/protobuf": "1.10.1"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",

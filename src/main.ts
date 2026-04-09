@@ -582,7 +582,9 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   try {
     const cacheMaxAge = core.getInput("cache-max-age") || null;
     const keepStorageInput = core.getInput("cache-keep-storage");
-    const keepStorageMB = keepStorageInput ? parseInt(keepStorageInput, 10) : null;
+    const keepStorageMB = keepStorageInput
+      ? parseInt(keepStorageInput, 10)
+      : null;
     const parts: string[] = [];
     if (cacheMaxAge) parts.push(`max age ${cacheMaxAge}`);
     if (keepStorageMB != null) parts.push(`keep at least ${keepStorageMB} MB`);
@@ -591,9 +593,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
     await pruneBuildkitCache(cacheMaxAge, keepStorageMB);
     core.info("BuildKit cache pruned");
   } catch (error) {
-    core.warning(
-      `Error pruning BuildKit cache: ${(error as Error).message}`,
-    );
+    core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);
   }
 
   const buildkitdShutdownStartTime = Date.now();
@@ -621,9 +621,7 @@ async function logBuildkitdCrashLogs(): Promise<void> {
     core.info("Last 100 lines of buildkitd.log:");
     core.info(stdout);
   } catch (error) {
-    core.warning(
-      `Could not read buildkitd logs: ${(error as Error).message}`,
-    );
+    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
   }
 }
 
@@ -751,7 +749,9 @@ void actionsToolkit.run(
         try {
           const builder = await toolkit.builder.inspect();
           if (builder && builder.driver !== "docker") {
-            core.info(`Found configured builder: ${builder.name} (driver: ${builder.driver})`);
+            core.info(
+              `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
+            );
           } else {
             // Create a local builder
             const createLocalBuilderCmd =

@@ -488,15 +488,11 @@ export async function pruneBuildkitCache(
     const output = stdout.trim();
     if (output) {
       const lines = output.split("\n").filter((l) => l.trim());
-      const totalLine = lines.find((l) =>
-        l.toLowerCase().startsWith("total:"),
-      );
+      const totalLine = lines.find((l) => l.toLowerCase().startsWith("total:"));
       if (totalLine) {
         core.info(`Build cache pruned: ${totalLine.trim()}`);
       } else {
-        core.info(
-          `Build cache pruned (${lines.length} entries reclaimed)`,
-        );
+        core.info(`Build cache pruned (${lines.length} entries reclaimed)`);
       }
       core.debug(`Prune output:\n${output}`);
     } else {
