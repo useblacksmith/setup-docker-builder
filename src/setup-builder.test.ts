@@ -84,8 +84,67 @@ describe("setup_builder", () => {
 
   // Tailscale tests removed - not needed for setup-docker-builder
 
+  describe("logBuildCacheContents", () => {
+    it("should log build cache contents from buildctl du", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          if (cmd.includes("buildctl") && cmd.includes("du")) {
+            cb(null, {
+              stdout: "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
+              stderr: "",
+            });
+          }
+        },
+      );
+
+      await setupBuilder.logBuildCacheContents();
+      expect(core.info).toHaveBeenCalledWith(
+        expect.stringContaining("Build cache contents:"),
+      );
+    });
+
+    it("should log empty cache when no output", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.logBuildCacheContents();
+      expect(core.info).toHaveBeenCalledWith("Build cache is empty");
+    });
+
+    it("should warn on error without throwing", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(new Error("du failed"), null);
+        },
+      );
+
+      await setupBuilder.logBuildCacheContents();
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining("Error listing build cache contents"),
+      );
+    });
+  });
+
   describe("pruneBuildkitCache", () => {
-    it("should prune buildkit cache successfully", async () => {
+    it("should prune buildkit cache successfully and log reclaimed entries", async () => {
       const exec = (await import("child_process")).exec as unknown as {
         mockImplementation: (
           fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
@@ -94,14 +153,111 @@ describe("setup_builder", () => {
       exec.mockImplementation(
         (cmd: string, cb: (...args: unknown[]) => void) => {
           if (cmd.includes("buildctl") && cmd.includes("prune")) {
-            cb(null, { stdout: "Cache pruned", stderr: "" });
+            cb(null, {
+              stdout: "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
+              stderr: "",
+            });
           }
         },
       );
 
       await setupBuilder.pruneBuildkitCache();
-      expect(core.debug).toHaveBeenCalledWith(
-        "Successfully pruned buildkit cache",
+      expect(core.info).toHaveBeenCalledWith(
+        "Build cache pruned: Total:\t\t50MB",
+      );
+    });
+
+    it("should use custom keep duration when provided", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      let capturedCmd = "";
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          capturedCmd = cmd;
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.pruneBuildkitCache("72h");
+      expect(capturedCmd).toContain("--keep-duration 72h");
+    });
+
+    it("should include --keep-bytes when provided", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      let capturedCmd = "";
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          capturedCmd = cmd;
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.pruneBuildkitCache("168h", 1000000000);
+      expect(capturedCmd).toContain("--keep-bytes 1000000000");
+      expect(capturedCmd).toContain("--keep-duration 168h");
+    });
+
+    it("should not include --keep-bytes when null", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      let capturedCmd = "";
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          capturedCmd = cmd;
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.pruneBuildkitCache("168h", null);
+      expect(capturedCmd).not.toContain("--keep-bytes");
+    });
+
+    it("should not include --keep-duration when null", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      let capturedCmd = "";
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          capturedCmd = cmd;
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.pruneBuildkitCache(null, 5000000000);
+      expect(capturedCmd).not.toContain("--keep-duration");
+      expect(capturedCmd).toContain("--keep-bytes 5000000000");
+    });
+
+    it("should log no data reclaimed when prune output is empty", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          if (cmd.includes("buildctl") && cmd.includes("prune")) {
+            cb(null, { stdout: "", stderr: "" });
+          }
+        },
+      );
+
+      await setupBuilder.pruneBuildkitCache();
+      expect(core.info).toHaveBeenCalledWith(
+        "Build cache pruned: no data reclaimed",
       );
     });
 

@@ -23,6 +23,7 @@ import {
   startAndConfigureBuildkitd,
   getNumCPUs,
   pruneBuildkitCache,
+  logBuildCacheContents,
   logDatabaseHashes,
 } from "./setup_builder";
 import {
@@ -313,6 +314,8 @@ export interface Inputs {
   "skip-integrity-check": boolean;
   "driver-opts": string[];
   "max-parallelism": number | null;
+  "cache-max-age": string | null;
+  "cache-keep-bytes": number | null;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -329,6 +332,19 @@ async function getInputs(): Promise<Inputs> {
     }
   }
 
+  const cacheKeepBytesInput = core.getInput("cache-keep-bytes");
+  let cacheKeepBytes: number | null = null;
+  if (cacheKeepBytesInput) {
+    const parsed = parseInt(cacheKeepBytesInput, 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      cacheKeepBytes = parsed;
+    } else {
+      core.warning(
+        `Invalid cache-keep-bytes value '${cacheKeepBytesInput}', ignoring. Must be a non-negative integer.`,
+      );
+    }
+  }
+
   return {
     "buildx-version": core.getInput("buildx-version"),
     "buildkit-version": core.getInput("buildkit-version"),
@@ -341,6 +357,8 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
+    "cache-max-age": core.getInput("cache-max-age") || null,
+    "cache-keep-bytes": cacheKeepBytes,
   };
 }
 
@@ -559,9 +577,18 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   core.info(`buildkitd process: ${pid}`);
 
+  await logBuildCacheContents();
+
   try {
-    core.info("Pruning BuildKit cache");
-    await pruneBuildkitCache();
+    const cacheMaxAge = core.getInput("cache-max-age") || null;
+    const keepBytesInput = core.getInput("cache-keep-bytes");
+    const keepBytes = keepBytesInput ? parseInt(keepBytesInput, 10) : null;
+    const parts: string[] = [];
+    if (cacheMaxAge) parts.push(`max age ${cacheMaxAge}`);
+    if (keepBytes != null) parts.push(`keep at least ${keepBytes} bytes`);
+    const desc = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    core.info(`Pruning BuildKit cache${desc}`);
+    await pruneBuildkitCache(cacheMaxAge, keepBytes);
     core.info("BuildKit cache pruned");
   } catch (error) {
     core.warning(
