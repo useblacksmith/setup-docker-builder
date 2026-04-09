@@ -580,7 +580,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   await logBuildCacheContents();
 
   try {
-    const cacheMaxAge = "1s";
+    const cacheMaxAge = null;
     const keepStorageMB = 1000;
     const parts: string[] = [];
     if (cacheMaxAge) parts.push(`max age ${cacheMaxAge}`);
