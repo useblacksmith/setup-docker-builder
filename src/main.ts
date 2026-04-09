@@ -315,7 +315,7 @@ export interface Inputs {
   "driver-opts": string[];
   "max-parallelism": number | null;
   "cache-max-age": string | null;
-  "cache-keep-storage": number | null;
+  "cache-free-storage": number | null;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -332,15 +332,15 @@ async function getInputs(): Promise<Inputs> {
     }
   }
 
-  const cacheKeepStorageInput = core.getInput("cache-keep-storage");
-  let cacheKeepStorage: number | null = null;
-  if (cacheKeepStorageInput) {
-    const parsed = parseInt(cacheKeepStorageInput, 10);
+  const cacheFreeStorageInput = core.getInput("cache-free-storage");
+  let cacheFreeStorage: number | null = null;
+  if (cacheFreeStorageInput) {
+    const parsed = parseInt(cacheFreeStorageInput, 10);
     if (!isNaN(parsed) && parsed >= 0) {
-      cacheKeepStorage = parsed;
+      cacheFreeStorage = parsed;
     } else {
       core.warning(
-        `Invalid cache-keep-storage value '${cacheKeepStorageInput}', ignoring. Must be a non-negative integer (MB).`,
+        `Invalid cache-free-storage value '${cacheFreeStorageInput}', ignoring. Must be a non-negative integer (MB).`,
       );
     }
   }
@@ -358,7 +358,7 @@ async function getInputs(): Promise<Inputs> {
     }),
     "max-parallelism": maxParallelism,
     "cache-max-age": core.getInput("cache-max-age") || null,
-    "cache-keep-storage": cacheKeepStorage,
+    "cache-free-storage": cacheFreeStorage,
   };
 }
 
@@ -581,16 +581,16 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   try {
     const cacheMaxAge = core.getInput("cache-max-age") || null;
-    const keepStorageInput = core.getInput("cache-keep-storage");
-    const keepStorageMB = keepStorageInput
-      ? parseInt(keepStorageInput, 10)
+    const freeStorageInput = core.getInput("cache-free-storage");
+    const freeStorageMB = freeStorageInput
+      ? parseInt(freeStorageInput, 10)
       : null;
     const parts: string[] = [];
     if (cacheMaxAge) parts.push(`max age ${cacheMaxAge}`);
-    if (keepStorageMB != null) parts.push(`keep at least ${keepStorageMB} MB`);
+    if (freeStorageMB != null) parts.push(`max cache ${freeStorageMB} MB`);
     const desc = parts.length > 0 ? ` (${parts.join(", ")})` : "";
     core.info(`Pruning BuildKit cache${desc}`);
-    await pruneBuildkitCache(cacheMaxAge, keepStorageMB);
+    await pruneBuildkitCache(cacheMaxAge, freeStorageMB);
     core.info("BuildKit cache pruned");
   } catch (error) {
     core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);

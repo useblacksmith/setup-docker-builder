@@ -36,8 +36,8 @@ inputs:
     description: "Maximum age of build cache entries to keep (e.g., 168h, 72h, 720h). Entries older than this are pruned on shutdown. Defaults to 168h (7 days)."
     required: false
     default: "168h"
-  cache-keep-storage:
-    description: "Amount of build cache to retain after pruning, in MB (e.g., 1000 for 1GB). If not set, no minimum is enforced."
+  cache-free-storage:
+    description: "Maximum build cache size to retain after pruning, in MB (e.g., 1000 for 1GB). If not set, no limit is enforced."
     required: false
 runs:
   using: node24
