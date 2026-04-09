@@ -468,22 +468,14 @@ export async function logBuildCacheContents(): Promise<void> {
 
 /**
  * Prunes buildkit cache data.
- * @param keepDuration Duration string for --keep-duration (e.g. "168h", "72h"). If null, no age limit is applied.
- * @param keepStorageMB Storage to retain in cache, in MB. If null, no minimum is enforced.
+ * @param keepStorageMB Storage to retain in cache, in MB. Defaults to 20480 (20GB).
  * @throws Error if buildctl prune command fails
  */
 export async function pruneBuildkitCache(
-  keepDuration: string | null = null,
-  keepStorageMB: number | null = null,
+  keepStorageMB: number = 20480,
 ): Promise<void> {
   try {
-    let cmd = `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --all`;
-    if (keepDuration) {
-      cmd += ` --keep-duration ${keepDuration}`;
-    }
-    if (keepStorageMB != null) {
-      cmd += ` --keep-storage ${keepStorageMB}`;
-    }
+    const cmd = `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --all --keep-storage ${keepStorageMB}`;
     const { stdout } = await execAsync(cmd);
     const output = stdout.trim();
     if (output) {

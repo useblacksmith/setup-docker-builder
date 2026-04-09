@@ -32,13 +32,10 @@ inputs:
   max-parallelism:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
-  cache-max-age:
-    description: "Maximum age of build cache entries to keep (e.g., 168h, 72h, 720h). Entries older than this are pruned on shutdown. Defaults to 168h (7 days)."
-    required: false
-    default: "168h"
   cache-keep-storage:
-    description: "Amount of build cache to retain after pruning, in MB (e.g., 1000 for 1GB). If not set, no minimum is enforced."
+    description: "Amount of build cache to retain after pruning, in MB (e.g., 1000 for 1GB). Defaults to 20480 (20GB)."
     required: false
+    default: "20480"
 runs:
   using: node24
   main: dist/index.js

@@ -314,8 +314,7 @@ export interface Inputs {
   "skip-integrity-check": boolean;
   "driver-opts": string[];
   "max-parallelism": number | null;
-  "cache-max-age": string | null;
-  "cache-keep-storage": number | null;
+  "cache-keep-storage": number;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -333,14 +332,14 @@ async function getInputs(): Promise<Inputs> {
   }
 
   const cacheKeepStorageInput = core.getInput("cache-keep-storage");
-  let cacheKeepStorage: number | null = null;
+  let cacheKeepStorage = 20480;
   if (cacheKeepStorageInput) {
     const parsed = parseInt(cacheKeepStorageInput, 10);
     if (!isNaN(parsed) && parsed >= 0) {
       cacheKeepStorage = parsed;
     } else {
       core.warning(
-        `Invalid cache-keep-storage value '${cacheKeepStorageInput}', ignoring. Must be a non-negative integer (MB).`,
+        `Invalid cache-keep-storage value '${cacheKeepStorageInput}', ignoring. Must be a non-negative integer (MB). Using default 20480 MB.`,
       );
     }
   }
@@ -357,7 +356,6 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
-    "cache-max-age": core.getInput("cache-max-age") || null,
     "cache-keep-storage": cacheKeepStorage,
   };
 }
@@ -580,14 +578,12 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   await logBuildCacheContents();
 
   try {
-    const cacheMaxAge = null;
-    const keepStorageMB = 1000;
-    const parts: string[] = [];
-    if (cacheMaxAge) parts.push(`max age ${cacheMaxAge}`);
-    if (keepStorageMB != null) parts.push(`keep at least ${keepStorageMB} MB`);
-    const desc = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-    core.info(`Pruning BuildKit cache${desc}`);
-    await pruneBuildkitCache(cacheMaxAge, keepStorageMB);
+    const keepStorageInput = core.getInput("cache-keep-storage");
+    const keepStorageMB = keepStorageInput
+      ? parseInt(keepStorageInput, 10)
+      : 20480;
+    core.info(`Pruning BuildKit cache (keep at least ${keepStorageMB} MB)`);
+    await pruneBuildkitCache(keepStorageMB);
     core.info("BuildKit cache pruned");
   } catch (error) {
     core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);

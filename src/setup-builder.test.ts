@@ -169,24 +169,6 @@ describe("setup_builder", () => {
       );
     });
 
-    it("should use custom keep duration when provided", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      let capturedCmd = "";
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          capturedCmd = cmd;
-          cb(null, { stdout: "", stderr: "" });
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache("72h");
-      expect(capturedCmd).toContain("--keep-duration 72h");
-    });
-
     it("should include --keep-storage when provided", async () => {
       const exec = (await import("child_process")).exec as unknown as {
         mockImplementation: (
@@ -201,12 +183,11 @@ describe("setup_builder", () => {
         },
       );
 
-      await setupBuilder.pruneBuildkitCache("168h", 1000);
+      await setupBuilder.pruneBuildkitCache(1000);
       expect(capturedCmd).toContain("--keep-storage 1000");
-      expect(capturedCmd).toContain("--keep-duration 168h");
     });
 
-    it("should not include --keep-storage when null", async () => {
+    it("should default to 20480 MB when no value provided", async () => {
       const exec = (await import("child_process")).exec as unknown as {
         mockImplementation: (
           fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
@@ -220,27 +201,8 @@ describe("setup_builder", () => {
         },
       );
 
-      await setupBuilder.pruneBuildkitCache("168h", null);
-      expect(capturedCmd).not.toContain("--keep-storage");
-    });
-
-    it("should not include --keep-duration when null", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      let capturedCmd = "";
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          capturedCmd = cmd;
-          cb(null, { stdout: "", stderr: "" });
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache(null, 5000);
-      expect(capturedCmd).not.toContain("--keep-duration");
-      expect(capturedCmd).toContain("--keep-storage 5000");
+      await setupBuilder.pruneBuildkitCache();
+      expect(capturedCmd).toContain("--keep-storage 20480");
     });
 
     it("should log no data reclaimed when prune output is empty", async () => {
