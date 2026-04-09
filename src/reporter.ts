@@ -1,12 +1,13 @@
 import * as core from "@actions/core";
 import axios from "axios";
 import axiosRetry from "axios-retry";
+import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
-import { StickyDiskService } from "@buf/blacksmith_vm-agent.connectrpc_es/stickydisk/v1/stickydisk_connect";
 import {
-  Metric,
+  MetricSchema,
   Metric_MetricType,
+  StickyDiskService,
 } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 // Configure base axios instance for Blacksmith API
@@ -49,7 +50,6 @@ export function createBlacksmithAgentClient() {
   );
   const transport = createGrpcTransport({
     baseUrl: `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`,
-    httpVersion: "2",
   });
 
   return createClient(StickyDiskService, transport);
@@ -95,7 +95,7 @@ export async function reportMetric(
 ) {
   try {
     const agentClient = createBlacksmithAgentClient();
-    const metric = new Metric({
+    const metric = create(MetricSchema, {
       type: metricType,
       value: { case: "intValue", value: BigInt(value) },
     });
