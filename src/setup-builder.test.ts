@@ -185,7 +185,7 @@ describe("setup_builder", () => {
       expect(capturedCmd).toContain("--keep-duration 72h");
     });
 
-    it("should include --keep-bytes when provided", async () => {
+    it("should include --keep-storage when provided", async () => {
       const exec = (await import("child_process")).exec as unknown as {
         mockImplementation: (
           fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
@@ -199,12 +199,12 @@ describe("setup_builder", () => {
         },
       );
 
-      await setupBuilder.pruneBuildkitCache("168h", 1000000000);
-      expect(capturedCmd).toContain("--keep-bytes 1000000000");
+      await setupBuilder.pruneBuildkitCache("168h", 1000);
+      expect(capturedCmd).toContain("--keep-storage 1000");
       expect(capturedCmd).toContain("--keep-duration 168h");
     });
 
-    it("should not include --keep-bytes when null", async () => {
+    it("should not include --keep-storage when null", async () => {
       const exec = (await import("child_process")).exec as unknown as {
         mockImplementation: (
           fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
@@ -219,7 +219,7 @@ describe("setup_builder", () => {
       );
 
       await setupBuilder.pruneBuildkitCache("168h", null);
-      expect(capturedCmd).not.toContain("--keep-bytes");
+      expect(capturedCmd).not.toContain("--keep-storage");
     });
 
     it("should not include --keep-duration when null", async () => {
@@ -236,9 +236,9 @@ describe("setup_builder", () => {
         },
       );
 
-      await setupBuilder.pruneBuildkitCache(null, 5000000000);
+      await setupBuilder.pruneBuildkitCache(null, 5000);
       expect(capturedCmd).not.toContain("--keep-duration");
-      expect(capturedCmd).toContain("--keep-bytes 5000000000");
+      expect(capturedCmd).toContain("--keep-storage 5000");
     });
 
     it("should log no data reclaimed when prune output is empty", async () => {
