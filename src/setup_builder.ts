@@ -451,7 +451,7 @@ export async function startAndConfigureBuildkitd(
 export async function logBuildCacheContents(): Promise<void> {
   try {
     const { stdout } = await execAsync(
-      `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} du --verbose`,
+      `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} du`,
     );
     const output = stdout.trim();
     if (output) {
