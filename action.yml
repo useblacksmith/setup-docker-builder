@@ -33,9 +33,8 @@ inputs:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
   cache-keep-storage:
-    description: "Amount of build cache to retain after pruning, in MB (e.g., 1000 for 1GB). Defaults to 20480 (20GB)."
+    description: "Amount of build cache to retain after pruning, in MB (e.g., 20480 for 20GB). If not set, pruning is skipped."
     required: false
-    default: "20480"
 runs:
   using: node24
   main: dist/index.js
