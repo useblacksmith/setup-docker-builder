@@ -23,6 +23,7 @@ import {
   startAndConfigureBuildkitd,
   getNumCPUs,
   pruneBuildkitCache,
+  logBuildCacheContents,
   logDatabaseHashes,
 } from "./setup_builder";
 import {
@@ -559,14 +560,26 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   core.info(`buildkitd process: ${pid}`);
 
+  await logBuildCacheContents();
+
   try {
-    core.info("Pruning BuildKit cache");
-    await pruneBuildkitCache();
-    core.info("BuildKit cache pruned");
+    const keepStorageInput = core.getInput("cache-keep-storage");
+    if (!keepStorageInput) {
+      core.info("Skipping BuildKit cache pruning (cache-keep-storage not set)");
+    } else {
+      const keepStorageMB = parseInt(keepStorageInput, 10);
+      if (isNaN(keepStorageMB) || keepStorageMB < 0) {
+        core.warning(
+          `Invalid cache-keep-storage value '${keepStorageInput}', skipping pruning. Must be a non-negative integer (MB).`,
+        );
+      } else {
+        core.info(`Pruning BuildKit cache (keep at least ${keepStorageMB} MB)`);
+        await pruneBuildkitCache(keepStorageMB);
+        core.info("BuildKit cache pruned");
+      }
+    }
   } catch (error) {
-    core.warning(
-      `Error pruning BuildKit cache: ${(error as Error).message}`,
-    );
+    core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);
   }
 
   const buildkitdShutdownStartTime = Date.now();
@@ -594,9 +607,7 @@ async function logBuildkitdCrashLogs(): Promise<void> {
     core.info("Last 100 lines of buildkitd.log:");
     core.info(stdout);
   } catch (error) {
-    core.warning(
-      `Could not read buildkitd logs: ${(error as Error).message}`,
-    );
+    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
   }
 }
 
@@ -724,7 +735,9 @@ void actionsToolkit.run(
         try {
           const builder = await toolkit.builder.inspect();
           if (builder && builder.driver !== "docker") {
-            core.info(`Found configured builder: ${builder.name} (driver: ${builder.driver})`);
+            core.info(
+              `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
+            );
           } else {
             // Create a local builder
             const createLocalBuilderCmd =

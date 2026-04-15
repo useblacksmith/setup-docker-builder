@@ -446,19 +446,50 @@ export async function startAndConfigureBuildkitd(
 }
 
 /**
- * Prunes buildkit cache data older than 7 days.
- * We don't specify any keep bytes here since we are
- * handling the ceph volume size limits ourselves in
- * the VM Agent.
+ * Logs the current contents of the buildkit build cache via `buildctl du`.
+ */
+export async function logBuildCacheContents(): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} du`,
+    );
+    const output = stdout.trim();
+    if (output) {
+      core.info(`Build cache contents:\n${output}`);
+    } else {
+      core.info("Build cache is empty");
+    }
+  } catch (error) {
+    core.warning(
+      `Error listing build cache contents: ${(error as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Prunes buildkit cache data.
+ * @param keepStorageMB Storage to retain in cache, in MB. Defaults to 20480 (20GB).
  * @throws Error if buildctl prune command fails
  */
-export async function pruneBuildkitCache(): Promise<void> {
+export async function pruneBuildkitCache(
+  keepStorageMB: number = 20480,
+): Promise<void> {
   try {
-    const sevenDaysInHours = 7 * 24;
-    await execAsync(
-      `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --keep-duration ${sevenDaysInHours}h --all`,
-    );
-    core.debug("Successfully pruned buildkit cache");
+    const cmd = `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --all --keep-storage ${keepStorageMB}`;
+    const { stdout } = await execAsync(cmd);
+    const output = stdout.trim();
+    if (output) {
+      const lines = output.split("\n").filter((l) => l.trim());
+      const totalLine = lines.find((l) => l.toLowerCase().startsWith("total:"));
+      if (totalLine) {
+        core.info(`Build cache pruned: ${totalLine.trim()}`);
+      } else {
+        core.info(`Build cache pruned (${lines.length} entries reclaimed)`);
+      }
+      core.debug(`Prune output:\n${output}`);
+    } else {
+      core.info("Build cache pruned: no data reclaimed");
+    }
   } catch (error) {
     core.warning(`Error pruning buildkit cache: ${(error as Error).message}`);
     throw error;
