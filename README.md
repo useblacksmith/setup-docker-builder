@@ -58,7 +58,11 @@ This action follows semantic versioning and supports multiple referencing patter
 | `skip-integrity-check` | If true, skip the bbolt database integrity check                                                              | No       | `false`        |
 | `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
+<<<<<<< HEAD
 | `max-cache-size`       | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
+=======
+| `cache-keep-storage`   | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
+>>>>>>> 8e30650 (Update readme to expose new options)
 
 ## Example Workflows
 
@@ -90,12 +94,12 @@ This action follows semantic versioning and supports multiple referencing patter
 
 ### Cache management
 
-Use `max-cache-size` to automatically prune the BuildKit cache after each build, retaining the specified amount in MB. This prevents the cache from growing unbounded while keeping the most recent layers available. The layers will be trimmed based off of the last accessed timestamp stored in the cache manager.
+Use `cache-keep-storage` to automatically prune the BuildKit cache after each build, retaining the specified amount in MB. This prevents the cache from growing unbounded while keeping the most recent layers available. The layers will be trimmed based off of the last accessed timestamp stored in the cache manager.
 
 ```yaml
 - uses: useblacksmith/setup-docker-builder@v1
   with:
-    max-cache-size: "409600" # retain up to 400 GB of build cache
+    cache-keep-storage: "409600" # retain up to 400 GB of build cache
 - uses: useblacksmith/build-push-action@v2
   with:
     push: true
