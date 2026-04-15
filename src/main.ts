@@ -597,6 +597,8 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   } else {
     core.info("Shutdown buildkitd gracefully");
   }
+
+  await logBuildkitdLogs();
 }
 
 async function logBuildkitdCrashLogs(): Promise<void> {
@@ -605,6 +607,18 @@ async function logBuildkitdCrashLogs(): Promise<void> {
       "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
     );
     core.info("Last 100 lines of buildkitd.log:");
+    core.info(stdout);
+  } catch (error) {
+    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
+  }
+}
+
+async function logBuildkitdLogs(): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      "cat /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
+    );
+    core.info("buildkitd logs:");
     core.info(stdout);
   } catch (error) {
     core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
