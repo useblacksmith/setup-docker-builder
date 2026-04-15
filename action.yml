@@ -33,7 +33,7 @@ inputs:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
   cache-keep-storage:
-    description: "Amount of build cache to retain after pruning, in MB (e.g., 20480 for 20GB). If not set, pruning is skipped."
+    description: "Amount of build cache to retain after pruning, in MB (e.g., 512000 for 500GB). If not set, pruning is skipped."
     required: false
 runs:
   using: node24
