@@ -48,13 +48,17 @@ This action follows semantic versioning and supports multiple referencing patter
 
 ## Inputs
 
-| Name               | Description                                                        | Required | Default        |
-| ------------------ | ------------------------------------------------------------------ | -------- | -------------- |
-| `buildx-version`   | Buildx version (e.g., v0.23.0, latest)                             | No       | `v0.23.0`      |
-| `buildkit-version` | BuildKit version to install (e.g., v0.16.0, v0.18.0)               | No       | System default |
-| `platforms`        | List of target platforms for build (e.g., linux/amd64,linux/arm64) | No       |                |
-| `nofallback`       | If true, fail the action if Blacksmith builder setup fails         | No       | `false`        |
-| `github-token`     | GitHub token for GitHub API access                                 | No       |                |
+| Name                   | Description                                                                                                   | Required | Default        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
+| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                                        | No       | `v0.23.0`      |
+| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                                          | No       | System default |
+| `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                            | No       |                |
+| `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                    | No       | `false`        |
+| `github-token`         | GitHub token for GitHub API access                                                                            | No       |                |
+| `skip-integrity-check` | If true, skip the bbolt database integrity check                                                              | No       | `false`        |
+| `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
+| `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
+| `max-cache-size`       | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
 
 ## Example Workflows
 
@@ -82,6 +86,20 @@ This action follows semantic versioning and supports multiple referencing patter
   with:
     file: ./Dockerfile.app2
     tags: user/app2:latest
+```
+
+### Cache management
+
+Use `max-cache-size` to automatically prune the BuildKit cache after each build, retaining the specified amount in MB. This prevents the cache from growing unbounded while keeping the most recent layers available. The layers will be trimmed based off of the last accessed timestamp stored in the cache manager.
+
+```yaml
+- uses: useblacksmith/setup-docker-builder@v1
+  with:
+    max-cache-size: "409600" # retain up to 400 GB of build cache
+- uses: useblacksmith/build-push-action@v2
+  with:
+    push: true
+    tags: user/app:latest
 ```
 
 ### Custom Docker commands
