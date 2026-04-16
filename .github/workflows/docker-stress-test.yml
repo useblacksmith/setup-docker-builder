@@ -46,10 +46,9 @@ jobs:
             image=moby/buildkit:latest
             network=host
           buildkitd-flags: --debug
-          install: true
           use: true
           endpoint: unix:///var/run/docker.sock
-          config-inline: |
+          buildkitd-config-inline: |
             [registry."docker.io"]
               mirrors = ["mirror.gcr.io"]
 
@@ -264,6 +263,7 @@ jobs:
       - name: Build with bake
         uses: docker/bake-action@v7
         with:
+          source: .
           targets: |
             default
             production
@@ -295,11 +295,10 @@ jobs:
             env.BUILDKIT_STEP_LOG_MAX_SIZE=50000000
             env.BUILDKIT_STEP_LOG_MAX_SPEED=10000000
           buildkitd-flags: --debug --allow-insecure-entitlement security.insecure
-          install: true
           use: true
           endpoint: unix:///var/run/docker.sock
           platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7,linux/arm/v6
-          config-inline: |
+          buildkitd-config-inline: |
             [worker.oci]
               max-parallelism = 4
 
