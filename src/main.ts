@@ -563,14 +563,14 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   await logBuildCacheContents();
 
   try {
-    const keepStorageInput = core.getInput("max-cache-size");
+    const keepStorageInput = core.getInput("max-cache-size-mb");
     if (!keepStorageInput) {
-      core.info("Skipping BuildKit cache pruning (max-cache-size not set)");
+      core.info("Skipping BuildKit cache pruning (max-cache-size-mb not set)");
     } else {
       const keepStorageMB = parseInt(keepStorageInput, 10);
       if (isNaN(keepStorageMB) || keepStorageMB < 0) {
         core.warning(
-          `Invalid max-cache-size value '${keepStorageInput}', skipping pruning. Must be a non-negative integer (MB).`,
+          `Invalid max-cache-size-mb value '${keepStorageInput}', skipping pruning. Must be a non-negative integer (MB).`,
         );
       } else {
         core.info(`Pruning BuildKit cache (keep at least ${keepStorageMB} MB)`);
