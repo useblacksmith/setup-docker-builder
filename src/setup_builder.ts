@@ -235,10 +235,6 @@ export async function startBuildkitd(
       }
     }
 
-    // Creates a log stream to write buildkitd output to a file.
-    const logStream = fs.createWriteStream("/tmp/buildkitd.log", {
-      flags: "a",
-    });
     // Start buildkitd in background (detached) mode since we're only setting up
     // Use custom buildkitd path if provided, otherwise use system buildkitd
     const buildkitdBinary = buildkitdPath || "buildkitd";
@@ -253,7 +249,7 @@ export async function startBuildkitd(
         buildkitdCommand += ` ${key}='${value}'`;
       }
     }
-    buildkitdCommand += ` ${buildkitdBinary} --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host > /tmp/buildkitd.log 2>&1 &`;
+    buildkitdCommand += ` ${buildkitdBinary} --debug --config=buildkitd.toml --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host 2>&1 | sudo tee -a /tmp/buildkitd.log /dev/console > /dev/null &`;
 
     core.info(`Starting buildkitd with command: ${buildkitdCommand}`);
     const buildkitd = execa(buildkitdCommand, {
@@ -262,14 +258,6 @@ export async function startBuildkitd(
       detached: true,
       cleanup: false,
     });
-
-    // Pipe stdout and stderr to log file
-    if (buildkitd.stdout) {
-      buildkitd.stdout.pipe(logStream);
-    }
-    if (buildkitd.stderr) {
-      buildkitd.stderr.pipe(logStream);
-    }
 
     buildkitd.on("error", (error) => {
       throw new Error(`Failed to start buildkitd: ${error.message}`);
