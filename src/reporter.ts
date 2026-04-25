@@ -2,8 +2,11 @@ import * as core from "@actions/core";
 import axios from "axios";
 import axiosRetry from "axios-retry";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
+import { Client, createClient } from "@connectrpc/connect";
+import {
+  createGrpcTransport,
+  Http2SessionManager,
+} from "@connectrpc/connect-node";
 import {
   MetricSchema,
   Metric_MetricType,
@@ -44,15 +47,60 @@ const createBlacksmithAPIClient = () => {
   return client;
 };
 
-export function createBlacksmithAgentClient() {
+// Cached so we open a single HTTP/2 session per process. The session must
+// be torn down via closeBlacksmithAgentClient() before the action exits,
+// otherwise it keeps the Node event loop alive for ~30s.
+let cachedAgentSessionManager: Http2SessionManager | undefined;
+let cachedAgentClient: Client<typeof StickyDiskService> | undefined;
+let cachedAgentBaseUrl: string | undefined;
+
+export function createBlacksmithAgentClient(): Client<
+  typeof StickyDiskService
+> {
+  const baseUrl = `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`;
+
+  if (cachedAgentClient && cachedAgentBaseUrl === baseUrl) {
+    return cachedAgentClient;
+  }
+
+  if (cachedAgentSessionManager) {
+    try {
+      cachedAgentSessionManager.abort();
+    } catch {
+      // best-effort
+    }
+  }
+
   core.info(
     `Creating Blacksmith agent client with port: ${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`,
   );
-  const transport = createGrpcTransport({
-    baseUrl: `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`,
-  });
 
-  return createClient(StickyDiskService, transport);
+  cachedAgentSessionManager = new Http2SessionManager(baseUrl);
+  const transport = createGrpcTransport({
+    baseUrl,
+    sessionManager: cachedAgentSessionManager,
+  });
+  cachedAgentClient = createClient(StickyDiskService, transport);
+  cachedAgentBaseUrl = baseUrl;
+
+  return cachedAgentClient;
+}
+
+// Must be called before the action exits. See cache comment above.
+// Safe to call multiple times.
+export function closeBlacksmithAgentClient(): void {
+  if (cachedAgentSessionManager) {
+    try {
+      cachedAgentSessionManager.abort();
+    } catch (error) {
+      core.debug(
+        `Failed to abort Blacksmith agent session: ${(error as Error).message}`,
+      );
+    }
+    cachedAgentSessionManager = undefined;
+  }
+  cachedAgentClient = undefined;
+  cachedAgentBaseUrl = undefined;
 }
 
 export async function reportBuildPushActionFailure(
