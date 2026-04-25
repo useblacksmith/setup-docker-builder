@@ -1,0 +1,143 @@
+name: Step Duration Regression
+
+# Fails CI if the action's setup or post step exceeds STEP_MAX_SECONDS.
+# Catches regressions of the dangling-Http2Session class of bug that
+# silently added ~30s per step.
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+
+env:
+  STEP_MAX_SECONDS: "5"
+  SETUP_STEP_NAME: "Setup Docker Builder under test"
+
+jobs:
+  exercise-action:
+    name: Run build with setup-docker-builder
+    runs-on: blacksmith
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: ${{ env.SETUP_STEP_NAME }}
+        uses: ./
+        with:
+          buildx-version: v0.23.0
+
+      - name: Trivial build
+        run: |
+          cat > Dockerfile.test <<'EOF'
+          FROM alpine:3.20
+          RUN echo "step-duration-regression"
+          EOF
+          docker buildx build -f Dockerfile.test --load -t setup-docker-builder-regression:local .
+
+  validate-step-durations:
+    name: Validate step durations
+    needs: exercise-action
+    if: always()
+    runs-on: blacksmith
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Assert setup and post steps stay under threshold
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          MAX_SECONDS: ${{ env.STEP_MAX_SECONDS }}
+          SETUP_STEP_NAME: ${{ env.SETUP_STEP_NAME }}
+          TARGET_JOB_NAME: "Run build with setup-docker-builder"
+        run: |
+          set -euo pipefail
+
+          echo "Fetching steps for run ${RUN_ID} in ${REPO}..."
+          jobs_json=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100")
+
+          setup_name="${SETUP_STEP_NAME}"
+          post_name="Post ${SETUP_STEP_NAME}"
+
+          # Returns step duration in seconds, or "MISSING".
+          step_duration_seconds() {
+            local job="$1"
+            local step="$2"
+
+            local line
+            line=$(echo "$jobs_json" | jq -r \
+              --arg job "$job" --arg step "$step" '
+                .jobs[] | select(.name == $job) | .steps[] | select(.name == $step) |
+                "\(.started_at) \(.completed_at)"
+              ')
+
+            local started completed
+            started=$(echo "$line" | awk '{print $1}')
+            completed=$(echo "$line" | awk '{print $2}')
+
+            if [[ -z "${started:-}" || -z "${completed:-}" \
+                  || "${started}" == "null" || "${completed}" == "null" ]]; then
+              echo "MISSING"
+              return
+            fi
+
+            local s c
+            s=$(date -u -d "$started" +%s)
+            c=$(date -u -d "$completed" +%s)
+            echo $(( c - s ))
+          }
+
+          echo ""
+          echo "=== ${TARGET_JOB_NAME} steps ==="
+          echo "$jobs_json" | jq -r --arg job "$TARGET_JOB_NAME" '
+            .jobs[] | select(.name == $job) | .steps[] |
+            "  step=\"\(.name)\" started=\(.started_at) completed=\(.completed_at) conclusion=\(.conclusion)"
+          '
+
+          setup_duration=$(step_duration_seconds "$TARGET_JOB_NAME" "$setup_name")
+          post_duration=$(step_duration_seconds  "$TARGET_JOB_NAME" "$post_name")
+
+          echo ""
+          echo "Setup step (\"${setup_name}\"): ${setup_duration}s"
+          echo "Post  step (\"${post_name}\"):  ${post_duration}s"
+          echo "Threshold: ${MAX_SECONDS}s"
+
+          {
+            echo "## Step Durations"
+            echo ""
+            echo "| Step | Duration | Threshold |"
+            echo "|---|---:|---:|"
+            echo "| Setup (\`${setup_name}\`) | **${setup_duration}s** | ${MAX_SECONDS}s |"
+            echo "| Post (\`${post_name}\`)   | **${post_duration}s**  | ${MAX_SECONDS}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          fail=0
+
+          assert_under_threshold() {
+            local label="$1" value="$2"
+            if [[ "$value" == "MISSING" ]]; then
+              echo "::error::Could not find ${label} step in job \"${TARGET_JOB_NAME}\". Did the previous job fail before the step ran?"
+              fail=1
+              return
+            fi
+            if (( value > MAX_SECONDS )); then
+              echo "::error::${label} step took ${value}s (> ${MAX_SECONDS}s threshold). Check for dangling open handles (Http2Session, axios keep-alive, fs watcher) at the end of the action body."
+              fail=1
+            fi
+          }
+
+          assert_under_threshold "setup" "$setup_duration"
+          assert_under_threshold "post"  "$post_duration"
+
+          if (( fail )); then
+            exit 1
+          fi
+
+          echo ""
+          echo "Both steps are within threshold."

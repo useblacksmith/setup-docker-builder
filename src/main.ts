@@ -760,6 +760,11 @@ void actionsToolkit.run(
     }
 
     stateHelper.setTmpDir(Context.tmpDir());
+
+    // Close the gRPC client and force-exit so a leaked open handle (HTTP/2
+    // session, axios keep-alive, etc.) cannot delay the step by ~30s.
+    reporter.closeBlacksmithAgentClient();
+    setImmediate(() => process.exit(process.exitCode ?? 0));
   },
   // post action - cleanup
   async () => {
@@ -973,6 +978,10 @@ void actionsToolkit.run(
           "Expose ID not found in state, skipping sticky disk commit",
         );
       }
+
+      // See main step: close gRPC client + force-exit to avoid ~30s hang.
+      reporter.closeBlacksmithAgentClient();
     });
+    setImmediate(() => process.exit(process.exitCode ?? 0));
   },
 );
