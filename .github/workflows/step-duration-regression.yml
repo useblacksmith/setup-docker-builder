@@ -14,6 +14,11 @@ on:
 
 env:
   STEP_MAX_SECONDS: "5"
+  # Hard ceiling for the buildkitd readiness window (time from
+  # "buildkitd version" to "Found N workers"). Dominated by buildkitd's
+  # own OCI-worker init; we want to catch a regression of either the
+  # action's polling backoff or buildkitd warm-up itself.
+  BUILDKITD_READY_MAX_MS: "8000"
   SETUP_STEP_NAME: "Setup Docker Builder under test"
 
 jobs:
@@ -46,12 +51,13 @@ jobs:
       actions: read
       contents: read
     steps:
-      - name: Assert setup and post steps stay under threshold
+      - name: Assert setup, post, and buildkitd readiness stay under thresholds
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
           MAX_SECONDS: ${{ env.STEP_MAX_SECONDS }}
+          MAX_READY_MS: ${{ env.BUILDKITD_READY_MAX_MS }}
           SETUP_STEP_NAME: ${{ env.SETUP_STEP_NAME }}
           TARGET_JOB_NAME: "Run build with setup-docker-builder"
         run: |
@@ -62,6 +68,10 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100")
 
+          target_job_id=$(echo "$jobs_json" | jq -r \
+            --arg job "$TARGET_JOB_NAME" \
+            '.jobs[] | select(.name == $job) | .id')
+
           setup_name="${SETUP_STEP_NAME}"
           post_name="Post ${SETUP_STEP_NAME}"
 
@@ -69,24 +79,20 @@ jobs:
           step_duration_seconds() {
             local job="$1"
             local step="$2"
-
             local line
             line=$(echo "$jobs_json" | jq -r \
               --arg job "$job" --arg step "$step" '
                 .jobs[] | select(.name == $job) | .steps[] | select(.name == $step) |
                 "\(.started_at) \(.completed_at)"
               ')
-
             local started completed
             started=$(echo "$line" | awk '{print $1}')
             completed=$(echo "$line" | awk '{print $2}')
-
             if [[ -z "${started:-}" || -z "${completed:-}" \
                   || "${started}" == "null" || "${completed}" == "null" ]]; then
               echo "MISSING"
               return
             fi
-
             local s c
             s=$(date -u -d "$started" +%s)
             c=$(date -u -d "$completed" +%s)
@@ -103,23 +109,41 @@ jobs:
           setup_duration=$(step_duration_seconds "$TARGET_JOB_NAME" "$setup_name")
           post_duration=$(step_duration_seconds  "$TARGET_JOB_NAME" "$post_name")
 
+          # buildkitd readiness window: extracted from the action's own
+          # "buildkitd workers ready in <N>ms after <K> poll(s)" log line.
+          # Falls back to MISSING if the line isn't present (e.g. an older
+          # version of the action without the telemetry).
+          ready_ms="MISSING"
+          ready_polls="MISSING"
+          if [[ -n "$target_job_id" && "$target_job_id" != "null" ]]; then
+            log_text=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/actions/jobs/${target_job_id}/logs" 2>/dev/null || true)
+            ready_line=$(echo "$log_text" | grep -E 'buildkitd workers ready in [0-9]+ms after [0-9]+ poll' | tail -n1 || true)
+            if [[ -n "$ready_line" ]]; then
+              ready_ms=$(echo "$ready_line" | sed -E 's/.*ready in ([0-9]+)ms.*/\1/')
+              ready_polls=$(echo "$ready_line" | sed -E 's/.*after ([0-9]+) poll.*/\1/')
+            fi
+          fi
+
           echo ""
-          echo "Setup step (\"${setup_name}\"): ${setup_duration}s"
-          echo "Post  step (\"${post_name}\"):  ${post_duration}s"
-          echo "Threshold: ${MAX_SECONDS}s"
+          echo "Setup step (\"${setup_name}\"): ${setup_duration}s   (threshold ${MAX_SECONDS}s)"
+          echo "Post  step (\"${post_name}\"):  ${post_duration}s   (threshold ${MAX_SECONDS}s)"
+          echo "buildkitd readiness:          ${ready_ms}ms in ${ready_polls} poll(s)   (threshold ${MAX_READY_MS}ms)"
 
           {
             echo "## Step Durations"
             echo ""
-            echo "| Step | Duration | Threshold |"
+            echo "| Metric | Value | Threshold |"
             echo "|---|---:|---:|"
-            echo "| Setup (\`${setup_name}\`) | **${setup_duration}s** | ${MAX_SECONDS}s |"
-            echo "| Post (\`${post_name}\`)   | **${post_duration}s**  | ${MAX_SECONDS}s |"
+            echo "| Setup step (\`${setup_name}\`) | **${setup_duration}s** | ${MAX_SECONDS}s |"
+            echo "| Post step (\`${post_name}\`)   | **${post_duration}s**  | ${MAX_SECONDS}s |"
+            echo "| buildkitd readiness (polled)   | **${ready_ms}ms** in ${ready_polls} poll(s) | ${MAX_READY_MS}ms |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           fail=0
 
-          assert_under_threshold() {
+          assert_step_under_threshold() {
             local label="$1" value="$2"
             if [[ "$value" == "MISSING" ]]; then
               echo "::error::Could not find ${label} step in job \"${TARGET_JOB_NAME}\". Did the previous job fail before the step ran?"
@@ -132,12 +156,21 @@ jobs:
             fi
           }
 
-          assert_under_threshold "setup" "$setup_duration"
-          assert_under_threshold "post"  "$post_duration"
+          assert_step_under_threshold "setup" "$setup_duration"
+          assert_step_under_threshold "post"  "$post_duration"
+
+          # buildkitd readiness is informational on older action versions
+          # (no telemetry line); only enforced when we got a real number.
+          if [[ "$ready_ms" == "MISSING" ]]; then
+            echo "::warning::No 'buildkitd workers ready' telemetry found in the job log. Skipping buildkitd-readiness threshold check."
+          elif (( ready_ms > MAX_READY_MS )); then
+            echo "::error::buildkitd readiness took ${ready_ms}ms (> ${MAX_READY_MS}ms threshold). Either buildkitd warm-up regressed (check the buildkitd.log tail in the job logs) or the action's polling backoff regressed."
+            fail=1
+          fi
 
           if (( fail )); then
             exit 1
           fi
 
           echo ""
-          echo "Both steps are within threshold."
+          echo "All thresholds passed."

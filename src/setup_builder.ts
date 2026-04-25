@@ -10,8 +10,28 @@ import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
 
 // Constants for configuration.
 const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
+const BUILDKITD_LOG_PATH = "/tmp/buildkitd.log";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
+
+async function logBuildkitdLogTail(
+  lines: number,
+  label: string,
+): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      `tail -n ${lines} ${BUILDKITD_LOG_PATH} 2>/dev/null || true`,
+    );
+    if (stdout.trim()) {
+      core.info(`${label} (last ${lines} lines of ${BUILDKITD_LOG_PATH}):`);
+      core.info(stdout);
+    } else {
+      core.info(`${label}: ${BUILDKITD_LOG_PATH} is empty or missing`);
+    }
+  } catch (error) {
+    core.debug(`Could not read buildkitd log: ${(error as Error).message}`);
+  }
+}
 
 // Tailscale functions removed - not needed for setup-docker-builder
 // Multi-platform builds are handled differently in the new architecture
@@ -397,21 +417,30 @@ export async function startAndConfigureBuildkitd(
   core.debug(`buildkitd daemon started at addr ${addr}`);
   stateHelper.setBuildkitdAddr(addr);
 
-  // Check that buildkit instance is ready by querying workers for up to 30s
+  // Poll `buildctl debug workers` until the OCI worker is registered or
+  // until buildkitdTimeoutMs elapses. Uses exponential backoff so the
+  // common case (worker comes up in <1s) doesn't pay a full 1s of
+  // polling discretization.
   const startTimeBuildkitReady = Date.now();
   const timeoutBuildkitReady = buildkitdTimeoutMs;
+  const requiredWorkers = 1;
+  let backoffMs = 100;
+  let pollAttempts = 0;
+  let foundWorkers = 0;
 
   while (Date.now() - startTimeBuildkitReady < timeoutBuildkitReady) {
+    pollAttempts++;
     try {
       const { stdout } = await execAsync(
         `sudo buildctl --addr ${addr} debug workers`,
       );
       const lines = stdout.trim().split("\n");
-      // We only need 1 worker for setup-docker-builder
-      const requiredWorkers = 1;
-      if (lines.length > requiredWorkers) {
+      foundWorkers = Math.max(0, lines.length - 1);
+      if (foundWorkers >= requiredWorkers) {
+        const readyMs = Date.now() - startTimeBuildkitReady;
+        core.info(`Found ${foundWorkers} workers, required ${requiredWorkers}`);
         core.info(
-          `Found ${lines.length - 1} workers, required ${requiredWorkers}`,
+          `buildkitd workers ready in ${readyMs}ms after ${pollAttempts} poll(s)`,
         );
         break;
       }
@@ -420,7 +449,15 @@ export async function startAndConfigureBuildkitd(
         `Error checking buildkit workers: ${(error as Error).message}`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    backoffMs = Math.min(backoffMs * 2, 1000);
+  }
+
+  // If readiness took >2s, surface the tail of buildkitd.log so the
+  // slow path is self-explanatory in CI without spamming the fast path.
+  const readinessMs = Date.now() - startTimeBuildkitReady;
+  if (foundWorkers >= requiredWorkers && readinessMs > 2000) {
+    await logBuildkitdLogTail(50, "buildkitd readiness took >2s, tailing log");
   }
 
   // Final check after timeout.
