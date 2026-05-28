@@ -489,6 +489,26 @@ async function startBlacksmithBuilder(
     );
     if (!boltdbIntegrity) {
       core.error("BoltDB integrity check failed");
+      core.warning(
+        "Auto-purging corrupted buildkit cache to recover. This build will have a cache miss.",
+      );
+      try {
+        await execAsync(
+          "sudo find /var/lib/buildkit -mindepth 1 -delete 2>/dev/null || true",
+        );
+        core.info("Successfully purged corrupted buildkit cache contents");
+      } catch (purgeError) {
+        core.warning(
+          `Failed to purge corrupted buildkit cache: ${(purgeError as Error).message}`,
+        );
+      }
+      await reporter.reportBuildPushActionFailure(
+        "BUILDER_STARTUP",
+        new Error(
+          "auto-purged corrupted buildkit cache after integrity check failure",
+        ),
+        "boltdb integrity auto-purge",
+      );
     }
 
     // Start buildkitd
