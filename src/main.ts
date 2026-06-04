@@ -718,6 +718,8 @@ void actionsToolkit.run(
             );
           }
         });
+
+        core.setOutput("name", name);
       });
 
       // Print builder info
@@ -738,13 +740,15 @@ void actionsToolkit.run(
             core.info(
               `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
             );
+            core.setOutput("name", builder.name);
           } else {
             // Create a local builder
-            const createLocalBuilderCmd =
-              "docker buildx create --name local --driver docker-container --use";
+            const localBuilderName = "local";
+            const createLocalBuilderCmd = `docker buildx create --name ${localBuilderName} --driver docker-container --use`;
             try {
               await Exec.exec(createLocalBuilderCmd);
               core.info("Created and set a local builder for use");
+              core.setOutput("name", localBuilderName);
             } catch (error) {
               core.setFailed(
                 `Failed to create local builder: ${(error as Error).message}`,

@@ -60,6 +60,12 @@ This action follows semantic versioning and supports multiple referencing patter
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
 | `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
 
+## Outputs
+
+| Name   | Description  |
+| ------ | ------------ |
+| `name` | Builder name |
+
 ## Example Workflows
 
 ### Basic usage with build-push-action

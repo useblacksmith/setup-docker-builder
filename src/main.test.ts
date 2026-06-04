@@ -7,6 +7,7 @@ vi.mock("@actions/core", () => ({
   getInput: vi.fn(),
   getBooleanInput: vi.fn(),
   setFailed: vi.fn(),
+  setOutput: vi.fn(),
   warning: vi.fn(),
   info: vi.fn(),
   debug: vi.fn(),
