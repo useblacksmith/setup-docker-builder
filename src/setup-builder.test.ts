@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
+import * as fs from "fs";
 import * as setupBuilder from "./setup_builder";
 // import * as reporter from "./reporter";
 
@@ -83,6 +84,26 @@ describe("setup_builder", () => {
   });
 
   // Tailscale tests removed - not needed for setup-docker-builder
+
+  describe("writeDockerContainerBuildkitdTomlFile", () => {
+    it("writes a docker-container BuildKit config with the Docker mirror", async () => {
+      const writeFile = vi.mocked(fs.promises.writeFile);
+
+      await setupBuilder.writeDockerContainerBuildkitdTomlFile(
+        "local-buildkitd.toml",
+      );
+
+      expect(writeFile.mock.calls[0][0]).toBe("local-buildkitd.toml");
+      const config = writeFile.mock.calls[0][1] as string;
+      expect(config).toContain('mirrors = [ "http://192.168.127.1:5000" ]');
+      expect(config).toContain('[registry."docker.io"]');
+      expect(config).toContain('[registry."192.168.127.1:5000"]');
+      expect(config).not.toContain("[grpc]");
+      expect(core.info).toHaveBeenCalledWith(
+        "Wrote Docker container BuildKit config to local-buildkitd.toml",
+      );
+    });
+  });
 
   describe("logBuildCacheContents", () => {
     it("should log build cache contents from buildctl du", async () => {
