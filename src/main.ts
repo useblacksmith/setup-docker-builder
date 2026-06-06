@@ -25,6 +25,7 @@ import {
   pruneBuildkitCache,
   logBuildCacheContents,
   logDatabaseHashes,
+  writeDockerContainerBuildkitdTomlFile,
 } from "./setup_builder";
 import {
   installBuildKit,
@@ -739,9 +740,11 @@ void actionsToolkit.run(
               `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
             );
           } else {
-            // Create a local builder
-            const createLocalBuilderCmd =
-              "docker buildx create --name local --driver docker-container --use";
+            // Create a local builder with the same Docker Hub mirror config as
+            // the Blacksmith builder so sticky disk failures do not bypass it.
+            const localBuilderConfigPath =
+              await writeDockerContainerBuildkitdTomlFile();
+            const createLocalBuilderCmd = `docker buildx create --name local --driver docker-container --config ${localBuilderConfigPath} --use`;
             try {
               await Exec.exec(createLocalBuilderCmd);
               core.info("Created and set a local builder for use");
