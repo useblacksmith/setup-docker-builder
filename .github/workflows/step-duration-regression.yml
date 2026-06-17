@@ -14,10 +14,10 @@ on:
 
 env:
   STEP_MAX_SECONDS: "5"
-  # Hard ceiling for the buildkitd readiness window (time from
-  # "buildkitd version" to "Found N workers"). Dominated by buildkitd's
-  # own OCI-worker init; we want to catch a regression of either the
-  # action's polling backoff or buildkitd warm-up itself.
+  # Hard ceiling for the buildkitd readiness window reported by the action
+  # (from buildkitd launch until the OCI worker is registered). Dominated by
+  # buildkitd's own OCI-worker init; we want to catch a regression of either
+  # the action's polling backoff or buildkitd warm-up itself.
   BUILDKITD_READY_MAX_MS: "8000"
   SETUP_STEP_NAME: "Setup Docker Builder under test"
 
@@ -126,10 +126,19 @@ jobs:
             fi
           fi
 
+          # Render the readiness value, distinguishing a real measurement
+          # from the older-action-version case where no telemetry line exists
+          # (so the output doesn't show a misleading "MISSINGms").
+          if [[ "$ready_ms" == "MISSING" ]]; then
+            ready_display="n/a (no telemetry line found)"
+          else
+            ready_display="${ready_ms}ms in ${ready_polls} poll(s)"
+          fi
+
           echo ""
           echo "Setup step (\"${setup_name}\"): ${setup_duration}s   (threshold ${MAX_SECONDS}s)"
           echo "Post  step (\"${post_name}\"):  ${post_duration}s   (threshold ${MAX_SECONDS}s)"
-          echo "buildkitd readiness:          ${ready_ms}ms in ${ready_polls} poll(s)   (threshold ${MAX_READY_MS}ms)"
+          echo "buildkitd readiness:          ${ready_display}   (threshold ${MAX_READY_MS}ms)"
 
           {
             echo "## Step Durations"
@@ -138,7 +147,7 @@ jobs:
             echo "|---|---:|---:|"
             echo "| Setup step (\`${setup_name}\`) | **${setup_duration}s** | ${MAX_SECONDS}s |"
             echo "| Post step (\`${post_name}\`)   | **${post_duration}s**  | ${MAX_SECONDS}s |"
-            echo "| buildkitd readiness (polled)   | **${ready_ms}ms** in ${ready_polls} poll(s) | ${MAX_READY_MS}ms |"
+            echo "| buildkitd readiness (polled)   | **${ready_display}** | ${MAX_READY_MS}ms |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           fail=0
