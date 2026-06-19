@@ -22,7 +22,7 @@ jobs:
     runs-on: blacksmith
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: ${{ env.SETUP_STEP_NAME }}
         uses: ./
