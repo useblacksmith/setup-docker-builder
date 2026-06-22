@@ -5,6 +5,13 @@ branding:
   icon: layers
   color: black
 inputs:
+  cache-key:
+    description: >-
+      Unique identifier for this build's Docker layer cache. Builds with the
+      same cache-key share cached layers across runs. Set this to the Dockerfile
+      being built (e.g., services/api/Dockerfile). Jobs building different
+      Dockerfiles should use different cache-keys to avoid cache thrashing.
+    required: true
   buildx-version:
     description: Buildx version. (e.g., v0.23.0, latest)
     required: false

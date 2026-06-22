@@ -506,6 +506,7 @@ async function startBlacksmithBuilder(
     );
 
     // Save state for post action
+    stateHelper.setCacheKey(core.getInput("cache-key"));
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
@@ -959,7 +960,11 @@ void actionsToolkit.run(
                 "No previous step failures detected, committing sticky disk after successful cleanup",
               );
 
-              await reporter.commitStickyDisk(exposeId, fsDiskUsageBytes);
+              await reporter.commitStickyDisk(
+                exposeId,
+                fsDiskUsageBytes,
+                stateHelper.getCacheKey(),
+              );
             } catch (error) {
               core.error(
                 `Failed to commit sticky disk: ${(error as Error).message}`,

@@ -207,13 +207,14 @@ export async function reportIntegrityCheckFailure(
 export async function commitStickyDisk(
   exposeId: string,
   fsDiskUsageBytes: number | null,
+  cacheKey?: string,
 ): Promise<void> {
   try {
     const agentClient = createBlacksmithAgentClient();
 
     const commitRequest: Record<string, unknown> = {
       exposeId: exposeId,
-      stickyDiskKey: process.env.GITHUB_REPO_NAME || "",
+      stickyDiskKey: cacheKey || process.env.GITHUB_REPO_NAME || "",
       vmId: process.env.BLACKSMITH_VM_ID || "",
       shouldCommit: true,
       repoName: process.env.GITHUB_REPO_NAME || "",

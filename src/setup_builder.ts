@@ -377,11 +377,12 @@ export async function getStickyDisk(options?: {
     throw new Error(`grpc connection test failed: ${(error as Error).message}`);
   }
 
-  const stickyDiskKey = process.env.GITHUB_REPO_NAME || "";
-  if (stickyDiskKey === "") {
-    throw new Error("GITHUB_REPO_NAME is not set");
+  const cacheKey = core.getInput("cache-key", { required: true });
+  if (cacheKey === "") {
+    throw new Error("cache-key input is required but was empty");
   }
-  core.info(`Getting sticky disk for ${stickyDiskKey}`);
+  const stickyDiskKey = cacheKey;
+  core.info(`Getting sticky disk for cache-key: ${stickyDiskKey}`);
 
   const response = await client.getStickyDisk(
     {

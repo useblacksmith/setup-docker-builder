@@ -38,6 +38,14 @@ export function getBuilderName(): string {
   return core.getState("builderName");
 }
 
+export function setCacheKey(key: string) {
+  core.saveState("cacheKey", key);
+}
+
+export function getCacheKey(): string {
+  return core.getState("cacheKey");
+}
+
 let _sigkillUsed = false;
 
 export function setSigkillUsed(used: boolean) {
