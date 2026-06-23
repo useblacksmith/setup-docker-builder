@@ -27,8 +27,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-typescript": "^12.1.4",
     "@tsconfig/node24": "^24.0.0",
     "@types/iarna__toml": "^2.0.5",
     "@types/node": "^24.1.0",
@@ -38,7 +36,6 @@
     "jiti": "^2.4.2",
     "lefthook": "^1.11.14",
     "prettier": "^3.6.2",
-    "rollup": "^4.43.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vitest": "^3.1.4"
