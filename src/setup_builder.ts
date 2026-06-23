@@ -76,6 +76,9 @@ export async function getNumCPUs(): Promise<number> {
  * reachable from containers in their own network namespace. This adds a
  * drop-in config to make it listen on 0.0.0.0:53.
  *
+ * After restarting the service, a DNS health-check verifies resolution is
+ * working before we hand the nameserver to BuildKit.
+ *
  * See: https://github.com/moby/buildkit/issues/5009
  */
 async function configureSystemdResolvedForBuildkit(): Promise<void> {
@@ -88,6 +91,8 @@ async function configureSystemdResolvedForBuildkit(): Promise<void> {
     core.info(
       "Configured systemd-resolved to listen on all interfaces for BuildKit DNS caching",
     );
+
+    await waitForDnsReady();
   } catch (error) {
     core.warning(
       `Failed to configure systemd-resolved: ${(error as Error).message}`,
@@ -96,10 +101,52 @@ async function configureSystemdResolvedForBuildkit(): Promise<void> {
 }
 
 /**
+ * Waits for systemd-resolved to become healthy after a restart by probing
+ * DNS resolution of a well-known hostname. Retries with backoff up to
+ * DNS_HEALTH_CHECK_TIMEOUT_MS to handle the brief window where the
+ * service is restarting.
+ */
+const DNS_HEALTH_CHECK_TIMEOUT_MS = 10_000;
+const DNS_HEALTH_CHECK_INTERVAL_MS = 500;
+const DNS_HEALTH_CHECK_HOSTS = ["registry.npmjs.org", "registry-1.docker.io"];
+
+async function waitForDnsReady(): Promise<void> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < DNS_HEALTH_CHECK_TIMEOUT_MS) {
+    try {
+      // Use getent to test DNS resolution through the system resolver
+      // (which goes via systemd-resolved). We check multiple hosts so a
+      // single upstream outage does not block the health-check.
+      for (const host of DNS_HEALTH_CHECK_HOSTS) {
+        await execAsync(`getent hosts ${host}`);
+      }
+      core.info("DNS health-check passed after systemd-resolved restart");
+      return;
+    } catch {
+      await new Promise((resolve) =>
+        setTimeout(resolve, DNS_HEALTH_CHECK_INTERVAL_MS),
+      );
+    }
+  }
+
+  core.warning(
+    `DNS health-check did not pass within ${DNS_HEALTH_CHECK_TIMEOUT_MS}ms — proceeding anyway`,
+  );
+}
+
+/**
  * Gets the host's primary routable IP address, which is reachable from
  * BuildKit build containers on any network mode (host, bridge, custom).
  *
- * Falls back to public DNS servers if the routable IP cannot be determined.
+ * Returns the host IP as primary nameserver, followed by one public DNS
+ * fallback. BuildKit round-robins across nameservers rather than using
+ * them as ordered fallbacks, so we limit the fallback list to a single
+ * entry to keep ~50% cache-hit rate on the local resolver while still
+ * providing redundancy when systemd-resolved is transiently unavailable.
+ *
+ * Falls back to public DNS servers entirely if the routable IP cannot be
+ * determined.
  */
 async function getRoutableHostDns(): Promise<string[]> {
   // Public DNS fallback in case we can't determine the host's routable IP
@@ -114,14 +161,16 @@ async function getRoutableHostDns(): Promise<string[]> {
 
     if (hostIp && hostIp !== "127.0.0.53") {
       core.info(
-        `Using host routable IP ${hostIp} as sole DNS nameserver for BuildKit (systemd-resolved cache)`,
+        `Using host routable IP ${hostIp} as primary DNS nameserver for BuildKit (systemd-resolved cache)`,
       );
-      // Only use the host IP (backed by systemd-resolved cache).
-      // Do NOT include public DNS fallbacks — BuildKit round-robins across
-      // all nameservers rather than using them as ordered fallbacks, which
-      // would bypass the cache for ~50% of queries and defeat the purpose.
-      // systemd-resolved itself already has upstream fallback configured.
-      return [hostIp];
+      // Include one public DNS fallback for redundancy. BuildKit
+      // round-robins across all configured nameservers, so with two
+      // entries ~50% of queries still hit the local cache while the
+      // other 50% go direct. This is a deliberate trade-off: we lose
+      // some cache efficiency but gain resilience against transient
+      // systemd-resolved failures (EAI_AGAIN / ETIMEDOUT) that have
+      // been observed to break builds in eu-west.
+      return [hostIp, "8.8.8.8"];
     }
   } catch (error) {
     core.warning(
@@ -172,10 +221,8 @@ async function writeBuildkitdTomlFile(
     grpc: {
       address: [addr],
     },
-    // Point BuildKit at the host's systemd-resolved cache via a routable IP.
-    // This avoids the known issue where BuildKit falls back to hardcoded public DNS
-    // (8.8.8.8/8.8.4.4) because it can't use the 127.0.0.53 stub resolver from
-    // containers in separate network namespaces.
+    // Point BuildKit at the host's systemd-resolved cache via a routable IP,
+    // with a public DNS fallback for resilience against transient resolver failures.
     // See: https://github.com/moby/buildkit/issues/5009
     dns: {
       nameservers: dnsNameservers,
