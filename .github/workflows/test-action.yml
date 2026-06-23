@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, release/v2]
 
 jobs:
   test-setup:
@@ -43,6 +43,7 @@ jobs:
       - name: Test Docker Builder Setup
         uses: ./
         with:
+          cache-key: test/setup-docker-builder
           buildx-version: "v0.23.0"
           nofallback: "false"
         continue-on-error: true # Allow failure since we may not have Blacksmith env vars
@@ -97,6 +98,7 @@ jobs:
       - name: Test Docker Builder Setup with Driver Options
         uses: ./
         with:
+          cache-key: test/setup-docker-builder-driver-opts
           buildx-version: "v0.23.0"
           driver-opts: |
             env.TEST_VAR_1=value1

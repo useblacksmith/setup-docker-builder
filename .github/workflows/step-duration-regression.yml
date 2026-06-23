@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, release/v2]
   schedule:
     - cron: "17 6 * * *"
 
@@ -27,6 +27,7 @@ jobs:
       - name: ${{ env.SETUP_STEP_NAME }}
         uses: ./
         with:
+          cache-key: test/step-duration-regression
           buildx-version: v0.23.0
 
       - name: Trivial build
