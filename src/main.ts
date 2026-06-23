@@ -33,6 +33,7 @@ import {
 import { shutdownBuildkitd } from "./shutdown";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
+import { runPreCommitHooks, type PrepareCommitResponse } from "./server-config";
 import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
@@ -933,17 +934,40 @@ void actionsToolkit.run(
               "Skipping sticky disk commit because SIGKILL was used to terminate buildkitd - disk may be in a bad state",
             );
           } else {
-            // No failures detected and cleanup was successful
-            try {
-              core.info(
-                "No previous step failures detected, committing sticky disk after successful cleanup",
-              );
+            // No failures detected and cleanup was successful — proceed with commit flow.
+            // Phase 3: call PrepareCommit RPC here to get shouldCommit + hooks from the
+            // server. For now, fall back to unconditional commit with no hooks.
+            const commitDecision: PrepareCommitResponse = {
+              shouldCommit: true,
+              hooks: [],
+            };
 
-              await reporter.commitStickyDisk(
-                exposeId,
-                fsDiskUsageBytes,
-                stateHelper.getCacheKey(),
-              );
+            try {
+              if (commitDecision.hooks.length > 0) {
+                const hookResult = await runPreCommitHooks(
+                  commitDecision.hooks,
+                );
+                if (!hookResult.shouldProceedWithCommit) {
+                  core.warning(
+                    "Pre-commit hook indicated commit should be skipped",
+                  );
+                  commitDecision.shouldCommit = false;
+                }
+              }
+
+              if (!commitDecision.shouldCommit) {
+                core.info("Server indicated commit should be skipped");
+              } else {
+                core.info(
+                  "No previous step failures detected, committing sticky disk after successful cleanup",
+                );
+
+                await reporter.commitStickyDisk(
+                  exposeId,
+                  fsDiskUsageBytes,
+                  stateHelper.getCacheKey(),
+                );
+              }
             } catch (error) {
               core.error(
                 `Failed to commit sticky disk: ${(error as Error).message}`,

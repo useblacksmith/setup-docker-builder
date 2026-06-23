@@ -7,6 +7,7 @@ import * as reporter from "./reporter";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
+import { BuildkitdConfig, DEFAULT_BUILDKITD_CONFIG } from "./server-config";
 
 // Constants for configuration.
 const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
@@ -166,7 +167,20 @@ async function writeBuildkitdTomlFile(
   parallelism: number,
   addr: string,
   dnsNameservers: string[],
+  serverConfig?: BuildkitdConfig,
 ): Promise<void> {
+  const config = serverConfig ?? DEFAULT_BUILDKITD_CONFIG;
+  const effectiveParallelism = config.maxParallelism ?? parallelism;
+
+  const gcPolicy = config.gcPolicy?.map((p) => {
+    const policy: TOML.JsonMap = {};
+    if (p.keepDuration) policy.keepDuration = p.keepDuration;
+    if (p.keepBytes) policy.keepBytes = p.keepBytes;
+    if (p.all !== undefined) policy.all = p.all;
+    if (p.filters) policy.filters = p.filters;
+    return policy;
+  });
+
   const jsonConfig: TOML.JsonMap = {
     root: "/var/lib/buildkit",
     grpc: {
@@ -184,14 +198,9 @@ async function writeBuildkitdTomlFile(
     worker: {
       oci: {
         enabled: true,
-        gc: true,
-        gcpolicy: [
-          {
-            keepDuration: "192h",
-            all: true,
-          },
-        ],
-        "max-parallelism": parallelism,
+        gc: config.gc,
+        ...(gcPolicy && gcPolicy.length > 0 ? { gcpolicy: gcPolicy } : {}),
+        "max-parallelism": effectiveParallelism,
         snapshotter: "overlayfs",
       },
       containerd: {
