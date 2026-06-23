@@ -39,9 +39,6 @@ inputs:
   max-parallelism:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
-  max-cache-size-mb:
-    description: "Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped."
-    required: false
 runs:
   using: node24
   main: dist/index.js

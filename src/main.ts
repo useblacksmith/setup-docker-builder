@@ -22,7 +22,6 @@ import {
   setupStickyDisk,
   startAndConfigureBuildkitd,
   getNumCPUs,
-  pruneBuildkitCache,
   logBuildCacheContents,
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
@@ -563,26 +562,6 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   core.info(`buildkitd process: ${pid}`);
 
   await logBuildCacheContents();
-
-  try {
-    const keepStorageInput = core.getInput("max-cache-size-mb");
-    if (!keepStorageInput) {
-      core.info("Skipping BuildKit cache pruning (max-cache-size-mb not set)");
-    } else {
-      const keepStorageMB = parseInt(keepStorageInput, 10);
-      if (isNaN(keepStorageMB) || keepStorageMB < 0) {
-        core.warning(
-          `Invalid max-cache-size-mb value '${keepStorageInput}', skipping pruning. Must be a non-negative integer (MB).`,
-        );
-      } else {
-        core.info(`Pruning BuildKit cache (keep at least ${keepStorageMB} MB)`);
-        await pruneBuildkitCache(keepStorageMB);
-        core.info("BuildKit cache pruned");
-      }
-    }
-  } catch (error) {
-    core.warning(`Error pruning BuildKit cache: ${(error as Error).message}`);
-  }
 
   const buildkitdShutdownStartTime = Date.now();
   await shutdownBuildkitd();

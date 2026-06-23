@@ -184,9 +184,13 @@ async function writeBuildkitdTomlFile(
     worker: {
       oci: {
         enabled: true,
-        // Disable automatic garbage collection, since we will prune manually. Automatic GC
-        // has been seen to negatively affect startup times of the daemon.
-        gc: false,
+        gc: true,
+        gcpolicy: [
+          {
+            keepDuration: "192h",
+            all: true,
+          },
+        ],
         "max-parallelism": parallelism,
         snapshotter: "overlayfs",
       },
