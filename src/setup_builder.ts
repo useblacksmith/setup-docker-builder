@@ -133,6 +133,35 @@ async function getRoutableHostDns(): Promise<string[]> {
   return publicDnsFallback;
 }
 
+function getDockerMirrorRegistryConfig(): TOML.JsonMap {
+  return {
+    "docker.io": {
+      mirrors: ["http://192.168.127.1:5000"],
+      http: true,
+      insecure: true,
+    },
+    "192.168.127.1:5000": {
+      http: true,
+      insecure: true,
+    },
+  };
+}
+
+async function writeTomlConfig(
+  filePath: string,
+  jsonConfig: TOML.JsonMap,
+): Promise<void> {
+  const tomlString = TOML.stringify(jsonConfig);
+
+  try {
+    await fs.promises.writeFile(filePath, tomlString);
+    core.debug(`TOML configuration is ${tomlString}`);
+  } catch (err) {
+    core.warning(`error writing TOML configuration: ${(err as Error).message}`);
+    throw err;
+  }
+}
+
 async function writeBuildkitdTomlFile(
   parallelism: number,
   addr: string,
@@ -151,17 +180,7 @@ async function writeBuildkitdTomlFile(
     dns: {
       nameservers: dnsNameservers,
     },
-    registry: {
-      "docker.io": {
-        mirrors: ["http://192.168.127.1:5000"],
-        http: true,
-        insecure: true,
-      },
-      "192.168.127.1:5000": {
-        http: true,
-        insecure: true,
-      },
-    },
+    registry: getDockerMirrorRegistryConfig(),
     worker: {
       oci: {
         enabled: true,
@@ -177,15 +196,27 @@ async function writeBuildkitdTomlFile(
     },
   };
 
-  const tomlString = TOML.stringify(jsonConfig);
+  await writeTomlConfig("buildkitd.toml", jsonConfig);
+}
 
-  try {
-    await fs.promises.writeFile("buildkitd.toml", tomlString);
-    core.debug(`TOML configuration is ${tomlString}`);
-  } catch (err) {
-    core.warning(`error writing TOML configuration: ${(err as Error).message}`);
-    throw err;
-  }
+export async function writeDockerContainerBuildkitdTomlFile(
+  filePath = "docker-container-buildkitd.toml",
+): Promise<string> {
+  // Keep this config safe for buildx's docker-container driver: it should not
+  // set grpc.address, which buildx owns for the containerized BuildKit daemon.
+  await configureSystemdResolvedForBuildkit();
+  const dnsNameservers = await getRoutableHostDns();
+  const jsonConfig: TOML.JsonMap = {
+    dns: {
+      nameservers: dnsNameservers,
+    },
+    registry: getDockerMirrorRegistryConfig(),
+  };
+
+  await writeTomlConfig(filePath, jsonConfig);
+  core.info(`Wrote Docker container BuildKit config to ${filePath}`);
+
+  return filePath;
 }
 
 export async function startBuildkitd(
