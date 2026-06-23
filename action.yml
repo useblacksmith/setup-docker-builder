@@ -35,6 +35,9 @@ inputs:
   max-cache-size-mb:
     description: "Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped."
     required: false
+outputs:
+  name:
+    description: "Builder name"
 runs:
   using: node24
   main: dist/index.js

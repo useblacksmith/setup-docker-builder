@@ -719,6 +719,8 @@ void actionsToolkit.run(
             );
           }
         });
+
+        core.setOutput("name", name);
       });
 
       // Print builder info
@@ -739,15 +741,18 @@ void actionsToolkit.run(
             core.info(
               `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
             );
+            core.setOutput("name", builder.name);
           } else {
             // Create a local builder with the same Docker Hub mirror config as
             // the Blacksmith builder so sticky disk failures do not bypass it.
+            const localBuilderName = "local";
             const localBuilderConfigPath =
               await writeDockerContainerBuildkitdTomlFile();
-            const createLocalBuilderCmd = `docker buildx create --name local --driver docker-container --config ${localBuilderConfigPath} --use`;
+            const createLocalBuilderCmd = `docker buildx create --name ${localBuilderName} --driver docker-container --config ${localBuilderConfigPath} --use`;
             try {
               await Exec.exec(createLocalBuilderCmd);
               core.info("Created and set a local builder for use");
+              core.setOutput("name", localBuilderName);
             } catch (error) {
               core.setFailed(
                 `Failed to create local builder: ${(error as Error).message}`,
