@@ -16,8 +16,41 @@ const execAsync = promisify(exec);
 // Tailscale functions removed - not needed for setup-docker-builder
 // Multi-platform builds are handled differently in the new architecture
 
+// deviceReadyTimeoutMs is the max time to wait for the guest kernel's virtio-blk
+// driver to expose a non-zero device size after a Firecracker drive hot-swap.
+const deviceReadyTimeoutMs = 5000;
+const deviceReadyPollIntervalMs = 50;
+
+async function waitForDeviceReady(device: string): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < deviceReadyTimeoutMs) {
+    try {
+      const { stdout } = await execAsync(`blockdev --getsize64 ${device}`);
+      const size = parseInt(stdout.trim(), 10);
+      if (size > 0) {
+        const elapsed = Date.now() - start;
+        core.info(
+          `Device ${device} ready: ${size} bytes (waited ${elapsed}ms)`,
+        );
+        return;
+      }
+    } catch {
+      // blockdev may fail transiently while the device is settling
+    }
+    await new Promise((r) => setTimeout(r, deviceReadyPollIntervalMs));
+  }
+  throw new Error(
+    `Device ${device} still reports zero size after ${deviceReadyTimeoutMs}ms — virtio-blk driver may not have processed the config-change interrupt`,
+  );
+}
+
 async function maybeFormatBlockDevice(device: string): Promise<string> {
   try {
+    // After a Firecracker drive hot-swap the guest kernel learns the new
+    // backing device size via an async virtio config-change interrupt.
+    // Wait until the device reports a non-zero size before touching it.
+    await waitForDeviceReady(device);
+
     // Check if device is formatted with ext4
     try {
       const { stdout } = await execAsync(
