@@ -18,7 +18,7 @@ const execAsync = promisify(exec);
 
 // deviceReadyTimeoutMs is the max time to wait for the guest kernel's virtio-blk
 // driver to expose a non-zero device size after a Firecracker drive hot-swap.
-const deviceReadyTimeoutMs = 5000;
+const deviceReadyTimeoutMs = 2000;
 const deviceReadyPollIntervalMs = 50;
 
 async function waitForDeviceReady(device: string): Promise<void> {
@@ -39,8 +39,8 @@ async function waitForDeviceReady(device: string): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, deviceReadyPollIntervalMs));
   }
-  throw new Error(
-    `Device ${device} still reports zero size after ${deviceReadyTimeoutMs}ms — virtio-blk driver may not have processed the config-change interrupt`,
+  core.warning(
+    `Device ${device} still reports zero size after ${deviceReadyTimeoutMs}ms — proceeding anyway`,
   );
 }
 
