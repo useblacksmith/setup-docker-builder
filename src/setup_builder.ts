@@ -422,8 +422,25 @@ export async function getStickyDisk(options?: {
 
 // buildkitdTimeoutMs states the max amount of time this action will wait for the buildkitd
 // daemon to start have its socket ready. It also additionally governs how long we will wait for
-// the buildkitd workers to be ready.
-const buildkitdTimeoutMs = 30000;
+// the buildkitd workers to be ready. Worker init can be slow when loading a large cache from
+// the sticky disk; falling back to a cold local builder costs far more than waiting here.
+const buildkitdTimeoutMs = 120000;
+
+/**
+ * Logs the tail of the buildkitd daemon log so failures during startup are
+ * visible in the job logs (and shipped to the observability pipeline).
+ */
+export async function logBuildkitdLogTail(): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
+    );
+    core.info("Last 100 lines of buildkitd.log:");
+    core.info(stdout);
+  } catch (error) {
+    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
+  }
+}
 
 export async function startAndConfigureBuildkitd(
   parallelism: number,
@@ -483,6 +500,12 @@ export async function startAndConfigureBuildkitd(
   } catch (error) {
     core.warning(
       `Error checking buildkit workers: ${(error as Error).message}`,
+    );
+    await logBuildkitdLogTail();
+    await reporter.reportBuildPushActionFailure(
+      "BUILDER_STARTUP",
+      error as Error,
+      "buildkitd worker readiness",
     );
     throw error;
   }
