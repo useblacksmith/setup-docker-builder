@@ -24,6 +24,7 @@ import {
   getNumCPUs,
   pruneBuildkitCache,
   logBuildCacheContents,
+  logBuildkitdLogTail,
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
 } from "./setup_builder";
@@ -494,16 +495,20 @@ async function startBlacksmithBuilder(
 
     // Start buildkitd
     const buildkitdStartTime = Date.now();
-    const buildkitdAddr = await startAndConfigureBuildkitd(
-      parallelism,
-      buildkitdPath,
-      inputs["driver-opts"],
-    );
-    const buildkitdDurationMs = Date.now() - buildkitdStartTime;
-    await reporter.reportMetric(
-      Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,
-      buildkitdDurationMs,
-    );
+    let buildkitdAddr: string;
+    try {
+      buildkitdAddr = await startAndConfigureBuildkitd(
+        parallelism,
+        buildkitdPath,
+        inputs["driver-opts"],
+      );
+    } finally {
+      const buildkitdDurationMs = Date.now() - buildkitdStartTime;
+      await reporter.reportMetric(
+        Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,
+        buildkitdDurationMs,
+      );
+    }
 
     // Save state for post action
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
@@ -555,7 +560,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
     core.warning(
       "buildkitd process has crashed - expected to be running but not found",
     );
-    await logBuildkitdCrashLogs();
+    await logBuildkitdLogTail();
     return;
   }
 
@@ -597,18 +602,6 @@ async function maybeShutdownBuildkitd(): Promise<void> {
     );
   } else {
     core.info("Shutdown buildkitd gracefully");
-  }
-}
-
-async function logBuildkitdCrashLogs(): Promise<void> {
-  try {
-    const { stdout } = await execAsync(
-      "tail -n 100 /tmp/buildkitd.log 2>/dev/null || echo 'No buildkitd.log found'",
-    );
-    core.info("Last 100 lines of buildkitd.log:");
-    core.info(stdout);
-  } catch (error) {
-    core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
   }
 }
 
