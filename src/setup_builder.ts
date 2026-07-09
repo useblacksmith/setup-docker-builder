@@ -459,7 +459,8 @@ export async function startAndConfigureBuildkitd(
       const requiredWorkers = 1;
       if (lines.length > requiredWorkers) {
         core.info(
-          `Found ${lines.length - 1} workers, required ${requiredWorkers}`,
+          `Found ${lines.length - 1} workers, required ${requiredWorkers} ` +
+            `(buildkitd workers ready after ${Date.now() - startTimeBuildkitReady}ms)`,
         );
         break;
       }
