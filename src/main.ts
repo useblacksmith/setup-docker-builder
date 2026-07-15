@@ -253,8 +253,8 @@ async function checkBoltDbIntegrity(skip = false): Promise<boolean> {
                   core.warning(
                     `⚠ ${dbFile}: Integrity check hit hard timeout after ${durationSeconds}s (possible I/O stall) - skipping`,
                   );
-                  // Exit code 124 = timeout, 137 = SIGKILL (likely OOM), 143 = SIGTERM
-                } else if (exitCode === 124) {
+                  // Exit code 124 = timeout, 137 = SIGKILL (likely OOM), 143 = SIGTERM (systemd RuntimeMaxSec)
+                } else if (exitCode === 124 || exitCode === 143) {
                   core.warning(
                     `⚠ ${dbFile}: Integrity check timed out after ${durationSeconds}s - skipping`,
                   );
