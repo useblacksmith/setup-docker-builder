@@ -25,6 +25,7 @@ import {
   pruneBuildkitCache,
   logBuildCacheContents,
   logBuildkitdLogTail,
+  warnOnDroppedBuildkitSessions,
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
 } from "./setup_builder";
@@ -771,6 +772,10 @@ void actionsToolkit.run(
       let integrityCheckPassed: boolean | null = null;
 
       try {
+        // Surface dropped buildx sessions (e.g. from memory pressure) so
+        // 'no active session' push failures are explained in the job log.
+        await warnOnDroppedBuildkitSessions();
+
         // Step 1: Shut down buildkitd if this instance started it.
         // When setup is called multiple times in one job, only the first
         // instance starts buildkitd; subsequent instances reuse it and
