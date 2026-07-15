@@ -55,7 +55,7 @@ This action follows semantic versioning and supports multiple referencing patter
 | `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                            | No       |                |
 | `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                    | No       | `false`        |
 | `github-token`         | GitHub token for GitHub API access                                                                            | No       |                |
-| `skip-integrity-check` | If true, skip the bbolt database integrity check                                                              | No       | `false`        |
+| `skip-integrity-check` | Deprecated: the bbolt database integrity check has been removed; this input has no effect                     | No       | `false`        |
 | `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
 | `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
