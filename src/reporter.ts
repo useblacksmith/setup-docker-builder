@@ -158,52 +158,6 @@ export async function reportMetric(
   }
 }
 
-/**
- * Reports bolt DB integrity check failure to the FA agent's internal metrics endpoint.
- * This sends the metric to Grafana via OpenTelemetry with the database file as an attribute.
- * Only called when an integrity check fails.
- */
-export async function reportIntegrityCheckFailure(
-  dbFile: string,
-): Promise<void> {
-  try {
-    const metricsPort =
-      process.env.BLACKSMITH_METRICS_HTTP_PORT ||
-      process.env.METRICS_PORT ||
-      "5556";
-    const metricsHost = "192.168.127.1";
-    const url = `http://${metricsHost}:${metricsPort}/internal`;
-
-    // Extract database file name (e.g., "history.db" or "cache.db")
-    const dbFileName = dbFile.split("/").pop() || dbFile;
-
-    const payload = {
-      metric_type: "boltdb_integrity_check_failure",
-      value: 1, // Always 1 for failures
-      vm_id: process.env.BLACKSMITH_VM_ID || "",
-      attributes: {
-        database_file: dbFileName,
-      },
-    };
-
-    const response = await axios.post(url, payload, {
-      timeout: 2000, // 2 second timeout
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    core.debug(
-      `Reported integrity check failure for ${dbFileName} (${response.status})`,
-    );
-  } catch (error) {
-    // Don't fail the action if metrics reporting fails
-    core.warning(
-      `Failed to report integrity check metric: ${(error as Error).message}`,
-    );
-  }
-}
-
 export async function commitStickyDisk(
   exposeId: string,
   fsDiskUsageBytes: number | null,
