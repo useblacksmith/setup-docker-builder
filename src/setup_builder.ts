@@ -16,6 +16,35 @@ const execAsync = promisify(exec);
 // Tailscale functions removed - not needed for setup-docker-builder
 // Multi-platform builds are handled differently in the new architecture
 
+// The VM agent's sticky-disk response can arrive before the guest kernel has
+// processed the virtio config-change interrupt that publishes the drive's real
+// capacity (the drive is hot-attached/hydrated in place), so the device can
+// transiently report a size of zero. Wait for a non-zero size before touching
+// the device.
+async function waitForNonZeroDeviceSize(
+  device: string,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const { stdout } = await execAsync(`sudo blockdev --getsize64 ${device}`);
+      const size = parseInt(stdout.trim(), 10);
+      if (!isNaN(size) && size > 0) {
+        return;
+      }
+    } catch {
+      // Device node may not exist yet; keep polling until the deadline.
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Device ${device} still reports zero size after ${timeoutMs}ms`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 async function maybeFormatBlockDevice(device: string): Promise<string> {
   try {
     // Check if device is formatted with ext4
@@ -641,6 +670,7 @@ export async function setupStickyDisk(): Promise<{
       throw new Error("No device found in sticky disk response");
     }
     clearTimeout(timeoutId);
+    await waitForNonZeroDeviceSize(device, 10000);
     await maybeFormatBlockDevice(device);
 
     await execAsync(`sudo mkdir -p ${mountPoint}`);
