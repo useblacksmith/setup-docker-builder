@@ -13,12 +13,6 @@ import { exec } from "child_process";
 import * as stateHelper from "./state-helper";
 import * as reporter from "./reporter";
 import {
-  execWithTimeout,
-  ExecTimeoutError,
-  BOLT_CHECK_MEMORY_MAX_BYTES,
-  BOLT_CHECK_MAX_FILE_BYTES,
-} from "./exec-utils";
-import {
   setupStickyDisk,
   startAndConfigureBuildkitd,
   getNumCPUs,
@@ -147,165 +141,6 @@ async function flushBlockDevice(devicePath: string): Promise<void> {
   }
 }
 
-async function checkBoltDbIntegrity(skip = false): Promise<boolean> {
-  if (skip) {
-    core.info(
-      "Skipping bbolt database integrity check (skip-integrity-check is enabled)",
-    );
-    return true;
-  }
-
-  try {
-    // Check if /var/lib/buildkit directory exists
-    try {
-      await execWithTimeout(
-        "test -d /var/lib/buildkit",
-        15_000,
-        "test buildkit dir exists",
-      );
-      core.debug(
-        "Found /var/lib/buildkit directory, checking for database files",
-      );
-
-      // Find all *.db files in /var/lib/buildkit
-      const { stdout: dbFiles } = await execWithTimeout(
-        "find /var/lib/buildkit -name '*.db' 2>/dev/null || true",
-        30_000,
-        "find db files",
-      );
-
-      if (dbFiles.trim()) {
-        const files = dbFiles.trim().split("\n");
-        core.info(
-          `Found ${files.length} database file(s): ${files.join(", ")}`,
-        );
-
-        let allChecksPass = true;
-        for (const dbFile of files) {
-          if (dbFile.trim()) {
-            try {
-              // Get file size
-              let sizeInfo = "";
-              let sizeBytes = 0;
-              try {
-                const { stdout: sizeOutput } = await execWithTimeout(
-                  `stat -c%s "${dbFile}" 2>/dev/null || stat -f%z "${dbFile}"`,
-                  15_000,
-                  `stat db file ${dbFile}`,
-                );
-                sizeBytes = parseInt(sizeOutput.trim(), 10);
-                if (!isNaN(sizeBytes) && sizeBytes > 0) {
-                  const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
-                  sizeInfo = ` (${sizeMB} MB)`;
-                }
-              } catch (error) {
-                core.debug(
-                  `Could not determine file size for ${dbFile}: ${(error as Error).message}`,
-                );
-              }
-
-              // Skip integrity check for files that are too large for the memory-limited
-              // systemd scope. bbolt check mmaps the entire file, and with ~50-60 MB of
-              // Go runtime overhead the process will be OOM-killed for large files.
-              if (sizeBytes > BOLT_CHECK_MAX_FILE_BYTES) {
-                const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
-                core.info(
-                  `${dbFile}: Skipping integrity check - file size ${sizeMB} MB exceeds limit (${BOLT_CHECK_MAX_FILE_BYTES / (1024 * 1024)} MB)`,
-                );
-                continue;
-              }
-
-              core.info(`Running bolt check on ${dbFile}${sizeInfo}...`);
-              const startTime = Date.now();
-
-              try {
-                const memoryMaxMB = BOLT_CHECK_MEMORY_MAX_BYTES / (1024 * 1024);
-                const { stdout: checkResult } = await execWithTimeout(
-                  `sudo systemd-run --scope --quiet -p MemoryMax=${memoryMaxMB}M -p RuntimeMaxSec=6s bbolt check "${dbFile}" 2>&1`,
-                  30_000,
-                  `bbolt check ${dbFile}`,
-                );
-                const duration = Date.now() - startTime;
-                const durationSeconds = (duration / 1000).toFixed(2);
-
-                if (duration > 5000) {
-                  core.warning(
-                    `⚠ ${dbFile}: Check took ${durationSeconds}s (exceeded 5s threshold)`,
-                  );
-                }
-
-                if (checkResult.includes("OK")) {
-                  core.info(`✓ ${dbFile}: Database integrity check passed`);
-                } else {
-                  core.warning(`⚠ ${dbFile}: ${checkResult}`);
-                  allChecksPass = false;
-                  // Report failed check
-                  await reporter.reportIntegrityCheckFailure(dbFile);
-                }
-              } catch (checkError) {
-                const duration = Date.now() - startTime;
-                const durationSeconds = (duration / 1000).toFixed(2);
-                const exitCode = (checkError as { code?: number }).code;
-                const errorMessage = (checkError as Error).message;
-
-                // ExecTimeoutError = Promise.race timeout (process stuck in D state, e.g. Ceph partition)
-                if (checkError instanceof ExecTimeoutError) {
-                  core.warning(
-                    `⚠ ${dbFile}: Integrity check hit hard timeout after ${durationSeconds}s (possible I/O stall) - skipping`,
-                  );
-                  // Exit code 124 = timeout, 137 = SIGKILL (likely OOM), 143 = SIGTERM
-                } else if (exitCode === 124) {
-                  core.warning(
-                    `⚠ ${dbFile}: Integrity check timed out after ${durationSeconds}s - skipping`,
-                  );
-                } else if (
-                  exitCode === 137 ||
-                  errorMessage.toLowerCase().includes("out of memory") ||
-                  errorMessage.toLowerCase().includes("cannot allocate memory")
-                ) {
-                  core.warning(
-                    `⚠ ${dbFile}: Integrity check hit memory limit - skipping`,
-                  );
-                } else {
-                  core.warning(
-                    `⚠ ${dbFile}: Integrity check failed: ${errorMessage}`,
-                  );
-                  allChecksPass = false;
-                  // Report actual failure
-                  await reporter.reportIntegrityCheckFailure(dbFile);
-                }
-              }
-            } catch (error) {
-              core.warning(
-                `Failed to check ${dbFile}: ${(error as Error).message}`,
-              );
-              allChecksPass = false;
-            }
-          }
-        }
-        return allChecksPass;
-      } else {
-        core.info("No *.db files found in /var/lib/buildkit");
-        return true;
-      }
-    } catch (error) {
-      if (error instanceof ExecTimeoutError) {
-        core.warning(
-          `Integrity check hit hard timeout during filesystem access (possible I/O stall) - skipping`,
-        );
-        return true;
-      }
-      core.info(
-        `/var/lib/buildkit directory not found, skipping database checks ${(error as Error).message}`,
-      );
-      return true;
-    }
-  } catch (error) {
-    core.warning(`BoltDB check failed: ${(error as Error).message}`);
-    return false;
-  }
-}
-
 // Minimal inputs interface for setup-docker-builder
 export interface Inputs {
   "buildx-version": string;
@@ -313,7 +148,6 @@ export interface Inputs {
   platforms: string[];
   nofallback: boolean;
   "github-token": string;
-  "skip-integrity-check": boolean;
   "driver-opts": string[];
   "max-parallelism": number | null;
 }
@@ -338,7 +172,6 @@ async function getInputs(): Promise<Inputs> {
     platforms: Util.getInputList("platforms"),
     nofallback: core.getBooleanInput("nofallback"),
     "github-token": core.getInput("github-token"),
-    "skip-integrity-check": core.getBooleanInput("skip-integrity-check"),
     "driver-opts": Util.getInputList("driver-opts", {
       ignoreComma: true,
       quote: false,
@@ -483,14 +316,6 @@ async function startBlacksmithBuilder(
         `Overriding max-parallelism from ${parallelism} (nproc) to ${inputs["max-parallelism"]} (user-specified)`,
       );
       parallelism = inputs["max-parallelism"];
-    }
-
-    // Check for potential boltdb corruption
-    const boltdbIntegrity = await checkBoltDbIntegrity(
-      inputs["skip-integrity-check"],
-    );
-    if (!boltdbIntegrity) {
-      core.error("BoltDB integrity check failed");
     }
 
     // Start buildkitd
@@ -768,7 +593,6 @@ void actionsToolkit.run(
       const exposeId = stateHelper.getExposeId();
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
-      let integrityCheckPassed: boolean | null = null;
 
       try {
         // Step 1: Shut down buildkitd if this instance started it.
@@ -797,12 +621,8 @@ void actionsToolkit.run(
           const { stdout: mountOutput } = await execAsync(
             `mount | grep "${mountPoint}"`,
           );
-          integrityCheckPassed = await checkBoltDbIntegrity(
-            stateHelper.inputs?.["skip-integrity-check"] ?? false,
-          );
-
-          // Log database file hashes after integrity check
-          await logDatabaseHashes("after integrity check");
+          // Log database file hashes before unmount
+          await logDatabaseHashes("before unmount");
 
           // Get filesystem usage BEFORE unmounting (critical timing)
           try {
@@ -918,14 +738,6 @@ void actionsToolkit.run(
             );
             core.warning(
               "Skipping sticky disk commit due to ambiguity in failure detection",
-            );
-          } else if (integrityCheckPassed === null) {
-            core.warning(
-              "Skipping sticky disk commit due to integrity check not being run",
-            );
-          } else if (!integrityCheckPassed) {
-            core.warning(
-              "Skipping sticky disk commit due to integrity check failure",
             );
           } else if (failureCheck.hasFailures) {
             core.warning(
