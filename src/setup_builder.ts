@@ -232,8 +232,13 @@ export async function startBuildkitd(
     const dnsNameservers = await getRoutableHostDns();
     await writeBuildkitdTomlFile(parallelism, addr, dnsNameservers);
 
-    // Parse driver-opts to extract environment variables
-    const envVars: Record<string, string> = {};
+    // Parse driver-opts to extract environment variables.
+    // Defaults keep the credential-carrying buildx session alive through
+    // transient client stalls (e.g. severe memory pressure during a build);
+    // user-supplied env.* driver-opts take precedence.
+    const envVars: Record<string, string> = {
+      BUILDKIT_SESSION_HEALTHCHECK_MAX_FAILURES: "10",
+    };
     if (driverOpts && driverOpts.length > 0) {
       core.info(`Processing ${driverOpts.length} driver-opt(s)`);
       for (const opt of driverOpts) {
@@ -425,6 +430,37 @@ export async function logBuildkitdLogTail(): Promise<void> {
     core.info(stdout);
   } catch (error) {
     core.warning(`Could not read buildkitd logs: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Scans the buildkitd log for dropped-session signatures and surfaces a clear
+ * warning. When the buildx session dies mid-build (typically because severe
+ * memory pressure stalls the client past the healthcheck tolerance), the
+ * eventual failure is a confusing registry auth error at push time
+ * ("no active session for <id>: context deadline exceeded"), so explain the
+ * real cause here.
+ */
+export async function warnOnDroppedBuildkitSessions(): Promise<void> {
+  try {
+    const { stdout } = await execAsync(
+      "grep -E 'healthcheck failed fatally|no active session' /tmp/buildkitd.log 2>/dev/null | tail -n 10 || true",
+    );
+    if (!stdout.trim()) {
+      return;
+    }
+    core.warning(
+      "BuildKit dropped one or more buildx sessions during this job. " +
+        "This usually means the runner was under severe memory pressure and the build client " +
+        "stalled past the session healthcheck tolerance. If a push failed with " +
+        "'no active session for <id>' or an auth error at /src/session/auth/auth.go, this is the " +
+        "root cause — consider a runner with more memory. Matching buildkitd log lines:\n" +
+        stdout.trim(),
+    );
+  } catch (error) {
+    core.debug(
+      `Could not scan buildkitd log for dropped sessions: ${(error as Error).message}`,
+    );
   }
 }
 

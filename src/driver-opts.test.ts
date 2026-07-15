@@ -116,13 +116,14 @@ describe("driver-opts parsing", () => {
 
     await startBuildkitd(4, "tcp://127.0.0.1:1234", undefined, []);
 
-    // Verify that execa was called without environment variables
+    // Verify that execa was called with only the default environment variables
     expect(mockExeca).toHaveBeenCalledTimes(1);
     const commandCall = mockExeca.mock.calls[0][0] as string;
 
-    // Should not contain any environment variables, no env command
     expect(commandCall).not.toContain("OTEL_");
-    expect(commandCall).not.toContain("sudo env");
+    expect(commandCall).toContain(
+      "BUILDKIT_SESSION_HEALTHCHECK_MAX_FAILURES='10'",
+    );
     expect(commandCall).toContain("nohup sudo");
   });
 
@@ -140,13 +141,14 @@ describe("driver-opts parsing", () => {
 
     await startBuildkitd(4, "tcp://127.0.0.1:1234", undefined, undefined);
 
-    // Verify that execa was called without environment variables
+    // Verify that execa was called with only the default environment variables
     expect(mockExeca).toHaveBeenCalledTimes(1);
     const commandCall = mockExeca.mock.calls[0][0] as string;
 
-    // Should not contain any environment variables, no env command
     expect(commandCall).not.toContain("OTEL_");
-    expect(commandCall).not.toContain("sudo env");
+    expect(commandCall).toContain(
+      "BUILDKIT_SESSION_HEALTHCHECK_MAX_FAILURES='10'",
+    );
     expect(commandCall).toContain("nohup sudo");
   });
 
