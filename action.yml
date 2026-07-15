@@ -23,7 +23,7 @@ inputs:
     description: "BuildKit version to install (e.g., v0.16.0, v0.18.0). If not specified, uses system default"
     required: false
   skip-integrity-check:
-    description: "If true, skip the bbolt database integrity check"
+    description: "Deprecated: the bbolt database integrity check has been removed; this input has no effect"
     required: false
     default: "false"
   driver-opts:
