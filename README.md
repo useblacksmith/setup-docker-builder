@@ -12,25 +12,33 @@ This GitHub Action sets up a Docker buildkitd builder with sticky disk cache for
 
 ## Usage
 
-### Basic Example
-
 ```yaml
+- name: Checkout
+  uses: actions/checkout@v4
+
 - name: Setup Docker Builder
-  uses: useblacksmith/setup-docker-builder@v1
+  uses: useblacksmith/setup-docker-builder@v2
   with:
-    buildx-version: "v0.23.0" # optional, defaults to v0.23.0
-    buildkit-version: "v0.16.0" # optional, uses system default if not specified
-    platforms: "linux/amd64,linux/arm64" # optional
-    nofallback: "false" # optional, defaults to false
-    github-token: ${{ secrets.GITHUB_TOKEN }} # optional
+    cache-key: my-repo/backend-image
+
+- name: Build and push
+  uses: useblacksmith/build-push-action@v2
+  with:
+    push: true
+    tags: user/backend:latest
 ```
 
-### Version Pinning
+Builds with the same `cache-key` share cached layers across runs; use one key per build target, e.g. `<repo>/<build-target>`. All inputs are listed in the tables below.
+
+### Version pinning
 
 This action follows semantic versioning and supports multiple referencing patterns:
 
 ```yaml
-# Recommended: Always get the latest compatible v1.x.x version (automatic updates for features/fixes)
+# Recommended: Always get the latest compatible v2.x.x version (automatic updates for features/fixes)
+- uses: useblacksmith/setup-docker-builder@v2
+
+# Latest compatible v1.x.x version
 - uses: useblacksmith/setup-docker-builder@v1
 
 # Pin to exact version (no automatic updates)
@@ -42,11 +50,28 @@ This action follows semantic versioning and supports multiple referencing patter
 
 **Which should you use?**
 
-- **`@v1`** - Recommended for most users. Automatically receives bug fixes and new features within v1.x.x
+- **`@v2`** - Recommended for new setups. Automatically receives bug fixes and new features within v2.x.x
+- **`@v1`** - For existing workflows on the v1 API. Automatically receives bug fixes within v1.x.x
 - **`@v1.1.0`** - Use when you need to lock to a specific version for reproducibility
 - **`@<sha>`** - Use for maximum security/stability in production environments
 
 ## Inputs
+
+### v2
+
+| Name                   | Description                                                                                                                                                                 | Required | Default        |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
+| `cache-key`            | Unique identifier for this build's Docker layer cache. Builds with the same key share cached layers across runs. Set it to the build target (e.g., `my-repo/backend-image`) | Yes      |                |
+| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                                                                                                      | No       | `v0.23.0`      |
+| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                                                                                                        | No       | System default |
+| `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                                                                                          | No       |                |
+| `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                                                                                  | No       | `false`        |
+| `github-token`         | GitHub token for GitHub API access                                                                                                                                          | No       |                |
+| `skip-integrity-check` | Deprecated: the bbolt database integrity check has been removed; this input has no effect                                                                                   | No       | `false`        |
+| `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                                                                                       | No       |                |
+| `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                                                                              | No       |                |
+
+### v1
 
 | Name                   | Description                                                                                                   | Required | Default        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
@@ -65,7 +90,9 @@ This action follows semantic versioning and supports multiple referencing patter
 ### Basic usage with build-push-action
 
 ```yaml
-- uses: useblacksmith/setup-docker-builder@v1
+- uses: useblacksmith/setup-docker-builder@v2
+  with:
+    cache-key: my-repo/app-image
 - uses: useblacksmith/build-push-action@v2
   with:
     push: true
@@ -75,7 +102,9 @@ This action follows semantic versioning and supports multiple referencing patter
 ### Multiple builds in one job
 
 ```yaml
-- uses: useblacksmith/setup-docker-builder@v1
+- uses: useblacksmith/setup-docker-builder@v2
+  with:
+    cache-key: app-images # one builder and cache for both builds in this job
 
 - uses: useblacksmith/build-push-action@v2
   with:
@@ -90,7 +119,18 @@ This action follows semantic versioning and supports multiple referencing patter
 
 ### Cache management
 
+#### v2
+
+No input is needed. BuildKit's native garbage collection runs with a time-based policy: layers that haven't been used for the retention period are cleaned up automatically, and actively used layers are kept regardless of total cache size.
+
+#### v1
+
 Use `max-cache-size-mb` to automatically prune the BuildKit cache after each build, retaining the specified amount in MB. This prevents the cache from growing unbounded while keeping the most recent layers available. The layers will be trimmed based off of the last accessed timestamp stored in the cache manager.
+
+Caveats:
+
+- Pruning runs at the end of the job, after the build completes. It is not a usage limit: the cache can grow well beyond the configured size during the build, and only the committed cache is trimmed back.
+- If different build targets share the same cache, pruning done by one target's job can evict layers another target still needs, causing rebuilds on its next run.
 
 ```yaml
 - uses: useblacksmith/setup-docker-builder@v1
@@ -105,7 +145,9 @@ Use `max-cache-size-mb` to automatically prune the BuildKit cache after each bui
 ### Custom Docker commands
 
 ```yaml
-- uses: useblacksmith/setup-docker-builder@v1
+- uses: useblacksmith/setup-docker-builder@v2
+  with:
+    cache-key: myapp
 
 - run: docker buildx bake
 
