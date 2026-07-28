@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
 import * as fs from "fs";
 import * as setupBuilder from "./setup_builder";
+import { UserInputError } from "./user-input-error";
 // import * as reporter from "./reporter";
 
 // Mock the modules
@@ -11,6 +12,7 @@ vi.mock("@actions/core", () => ({
   info: vi.fn(),
   error: vi.fn(),
   setFailed: vi.fn(),
+  getInput: vi.fn(() => ""),
 }));
 
 vi.mock("./reporter", () => ({
@@ -46,6 +48,18 @@ describe("setup_builder", () => {
     process.env.GITHUB_REPO_NAME = "test-repo";
     process.env.BLACKSMITH_REGION = "eu-central";
     process.env.BLACKSMITH_VM_ID = "test-vm-id";
+  });
+
+  describe("getStickyDisk", () => {
+    it("throws UserInputError without contacting the agent when cache-key is missing", async () => {
+      vi.mocked(core.getInput).mockReturnValue("");
+      const reporter = await import("./reporter");
+
+      await expect(setupBuilder.getStickyDisk()).rejects.toThrow(
+        UserInputError,
+      );
+      expect(reporter.createBlacksmithAgentClient).not.toHaveBeenCalled();
+    });
   });
 
   describe("getNumCPUs", () => {

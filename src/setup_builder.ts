@@ -4,6 +4,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as TOML from "@iarna/toml";
 import * as reporter from "./reporter";
+import { UserInputError } from "./user-input-error";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
@@ -408,6 +409,15 @@ export async function getStickyDisk(options?: {
   parent_snapshot_name: string;
   clone_name: string;
 }> {
+  const cacheKey = core.getInput("cache-key");
+  if (cacheKey === "") {
+    throw new UserInputError(
+      "The 'cache-key' input is required as of setup-docker-builder v2. " +
+        "Add it to your workflow step, e.g. 'cache-key: my-repo/my-image'. " +
+        "See https://github.com/useblacksmith/setup-docker-builder#readme for details.",
+    );
+  }
+
   const client = await reporter.createBlacksmithAgentClient();
   core.info(`Created Blacksmith agent client`);
 
@@ -419,10 +429,6 @@ export async function getStickyDisk(options?: {
     throw new Error(`grpc connection test failed: ${(error as Error).message}`);
   }
 
-  const cacheKey = core.getInput("cache-key", { required: true });
-  if (cacheKey === "") {
-    throw new Error("cache-key input is required but was empty");
-  }
   const stickyDiskKey = cacheKey;
   core.info(`Getting sticky disk for cache-key: ${stickyDiskKey}`);
 

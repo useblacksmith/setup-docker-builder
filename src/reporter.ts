@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import { UserInputError } from "./user-input-error";
 import axios from "axios";
 import axiosRetry from "axios-retry";
 import { create } from "@bufbuild/protobuf";
@@ -112,6 +113,12 @@ export async function reportBuildPushActionFailure(
   error?: Error,
   event?: string,
 ) {
+  if (error instanceof UserInputError) {
+    core.debug(
+      `Not reporting user input error to Blacksmith: ${error.message}`,
+    );
+    return;
+  }
   const requestOptions = {
     stickydisk_key: process.env.GITHUB_REPO_NAME || "",
     repo_name: process.env.GITHUB_REPO_NAME || "",
