@@ -3,7 +3,7 @@ import { UserInputError } from "./user-input-error";
 import axios from "axios";
 import axiosRetry from "axios-retry";
 import { create } from "@bufbuild/protobuf";
-import { Client, createClient } from "@connectrpc/connect";
+import { Client, Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
   createGrpcTransport,
   Http2SessionManager,
@@ -55,10 +55,34 @@ let cachedAgentSessionManager: Http2SessionManager | undefined;
 let cachedAgentClient: Client<typeof StickyDiskService> | undefined;
 let cachedAgentBaseUrl: string | undefined;
 
+export function getAgentAddr(): string | undefined {
+  return process.env.BLACKSMITH_AGENT_ADDR || undefined;
+}
+
+// True for environments where the agent is not expected to serve sticky
+// disks (agent address/port env not exported, or the agent rejected the
+// RPC as unimplemented); these are not infra failures and are not reported.
+export function isAgentUnsupportedError(error: unknown): boolean {
+  if (
+    error instanceof Error &&
+    error.message.includes("cannot dial the Blacksmith agent")
+  ) {
+    return true;
+  }
+  return error instanceof ConnectError && error.code === Code.Unimplemented;
+}
+
 export function createBlacksmithAgentClient(): Client<
   typeof StickyDiskService
 > {
-  const baseUrl = `http://192.168.127.1:${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`;
+  const addr = getAgentAddr();
+  const port = process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT;
+  if (!addr || !port) {
+    throw new Error(
+      "BLACKSMITH_AGENT_ADDR or BLACKSMITH_STICKY_DISK_GRPC_PORT is not set; cannot dial the Blacksmith agent",
+    );
+  }
+  const baseUrl = `http://${addr}:${port}`;
 
   if (cachedAgentClient && cachedAgentBaseUrl === baseUrl) {
     return cachedAgentClient;
@@ -72,9 +96,7 @@ export function createBlacksmithAgentClient(): Client<
     }
   }
 
-  core.info(
-    `Creating Blacksmith agent client with port: ${process.env.BLACKSMITH_STICKY_DISK_GRPC_PORT || "5557"}`,
-  );
+  core.info(`Creating Blacksmith agent client for ${baseUrl}`);
 
   cachedAgentSessionManager = new Http2SessionManager(baseUrl);
   const transport = createGrpcTransport({

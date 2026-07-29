@@ -165,13 +165,18 @@ async function getRoutableHostDns(): Promise<string[]> {
 }
 
 function getDockerMirrorRegistryConfig(): TOML.JsonMap {
+  const agentAddr = reporter.getAgentAddr();
+  if (!agentAddr) {
+    return {};
+  }
+  const mirror = `${agentAddr}:5000`;
   return {
     "docker.io": {
-      mirrors: ["http://192.168.127.1:5000"],
+      mirrors: [`http://${mirror}`],
       http: true,
       insecure: true,
     },
-    "192.168.127.1:5000": {
+    [mirror]: {
       http: true,
       insecure: true,
     },
@@ -421,12 +426,13 @@ export async function getStickyDisk(options?: {
   const client = await reporter.createBlacksmithAgentClient();
   core.info(`Created Blacksmith agent client`);
 
-  // Test connection using up endpoint
+  // Rethrow the original error so callers can classify it from the gRPC code.
   try {
     await client.up({}, { signal: options?.signal });
     core.info("Successfully connected to Blacksmith agent");
   } catch (error) {
-    throw new Error(`grpc connection test failed: ${(error as Error).message}`);
+    core.warning(`grpc connection test failed: ${(error as Error).message}`);
+    throw error;
   }
 
   const stickyDiskKey = cacheKey;
@@ -746,11 +752,14 @@ export async function setupStickyDisk(): Promise<{
     return { device, exposeId };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
-    await reporter.reportBuildPushActionFailure(
-      "STICKYDISK_SETUP",
-      error as Error,
-      "sticky disk setup",
-    );
+    // Unsupported environments are expected; don't report them as failures.
+    if (!reporter.isAgentUnsupportedError(error)) {
+      await reporter.reportBuildPushActionFailure(
+        "STICKYDISK_SETUP",
+        error as Error,
+        "sticky disk setup",
+      );
+    }
     throw error;
   }
 }
