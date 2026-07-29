@@ -674,14 +674,8 @@ export async function setupStickyDisk(): Promise<{
     await maybeFormatBlockDevice(device);
 
     await execAsync(`sudo mkdir -p ${mountPoint}`);
-    // Mount with noinit_itable to keep the ext4lazyinit kernel thread from
-    // zeroing uninitialized inode tables in the background. Sticky disks are
-    // copy-on-write clones of a committed snapshot: if the snapshot was taken
-    // before lazy init finished, every clone would redo the same multi-GB
-    // zeroing and the writes are thrown away when the clone is discarded. The
-    // zeroing is unnecessary here anyway - mkfs enables checksummed group
-    // descriptors that track unused inodes, and unallocated blocks on the
-    // thin-provisioned device already read back as zeroes.
+    // noinit_itable stops the background zeroing of a non-trivial portion of
+    // the device (uninitialized inode tables), which is unnecessary here.
     await execAsync(`sudo mount -o noinit_itable ${device} ${mountPoint}`);
     core.debug(`${device} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
