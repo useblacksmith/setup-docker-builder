@@ -21,6 +21,8 @@ vi.mock("./reporter", () => ({
   reportMetric: vi.fn(),
   commitStickyDisk: vi.fn(),
   reportBuild: vi.fn(),
+  getAgentAddr: vi.fn(() => process.env.BLACKSMITH_AGENT_ADDR || undefined),
+  isAgentUnsupportedError: vi.fn(() => false),
 }));
 
 vi.mock("child_process", () => ({
@@ -48,6 +50,7 @@ describe("setup_builder", () => {
     process.env.GITHUB_REPO_NAME = "test-repo";
     process.env.BLACKSMITH_REGION = "eu-central";
     process.env.BLACKSMITH_VM_ID = "test-vm-id";
+    process.env.BLACKSMITH_AGENT_ADDR = "192.168.127.1";
   });
 
   describe("getStickyDisk", () => {
@@ -101,6 +104,7 @@ describe("setup_builder", () => {
 
   describe("writeDockerContainerBuildkitdTomlFile", () => {
     it("writes a docker-container BuildKit config with the Docker mirror", async () => {
+      process.env.BLACKSMITH_AGENT_ADDR = "192.168.127.1";
       const writeFile = vi.mocked(fs.promises.writeFile);
 
       await setupBuilder.writeDockerContainerBuildkitdTomlFile(
@@ -116,6 +120,19 @@ describe("setup_builder", () => {
       expect(core.info).toHaveBeenCalledWith(
         "Wrote Docker container BuildKit config to local-buildkitd.toml",
       );
+    });
+
+    it("omits the Docker mirror when BLACKSMITH_AGENT_ADDR is not set", async () => {
+      delete process.env.BLACKSMITH_AGENT_ADDR;
+      const writeFile = vi.mocked(fs.promises.writeFile);
+
+      await setupBuilder.writeDockerContainerBuildkitdTomlFile(
+        "local-buildkitd.toml",
+      );
+
+      const config = writeFile.mock.calls[0][1] as string;
+      expect(config).not.toContain("mirrors");
+      expect(config).not.toContain("192.168.127.1:5000");
     });
   });
 
