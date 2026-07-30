@@ -674,7 +674,9 @@ export async function setupStickyDisk(): Promise<{
     await maybeFormatBlockDevice(device);
 
     await execAsync(`sudo mkdir -p ${mountPoint}`);
-    await execAsync(`sudo mount ${device} ${mountPoint}`);
+    // noinit_itable stops the background zeroing of a non-trivial portion of
+    // the device (uninitialized inode tables), which is unnecessary here.
+    await execAsync(`sudo mount -o noinit_itable ${device} ${mountPoint}`);
     core.debug(`${device} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
 
