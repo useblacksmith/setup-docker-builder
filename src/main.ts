@@ -339,6 +339,13 @@ async function startBlacksmithBuilder(
     stateHelper.setCacheKey(core.getInput("cache-key"));
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
 
+    // Expose the cache key so later steps (e.g. build-push-action) can
+    // attribute their builds to the sticky disk backing this builder.
+    core.exportVariable(
+      "BLACKSMITH_STICKYDISK_KEY",
+      core.getInput("cache-key"),
+    );
+
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
     if (inputs.nofallback) {
