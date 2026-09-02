@@ -63,6 +63,46 @@ describe("setup_builder", () => {
       );
       expect(reporter.createBlacksmithAgentClient).not.toHaveBeenCalled();
     });
+
+    async function getStickyDiskWithAgentResponse(response: object) {
+      vi.mocked(core.getInput).mockReturnValue("my-repo/my-image");
+      const reporter = await import("./reporter");
+      vi.mocked(reporter.createBlacksmithAgentClient).mockReturnValue({
+        up: vi.fn().mockResolvedValue({}),
+        getStickyDisk: vi.fn().mockResolvedValue(response),
+      } as unknown as ReturnType<typeof reporter.createBlacksmithAgentClient>);
+
+      return setupBuilder.getStickyDisk();
+    }
+
+    it("applies the backend GC keepDuration from the agent response", async () => {
+      const result = await getStickyDiskWithAgentResponse({
+        exposeId: "expose-1",
+        diskIdentifier: "/dev/vdb",
+        parentSnapshotName: "snap-1",
+        cloneName: "clone-1",
+        buildkitdConfig: { gcKeepDurationHours: 72n },
+      });
+
+      expect(result.device).toBe("/dev/vdb");
+      expect(result.buildkitd_config.gcPolicy).toEqual([
+        { keepDuration: "72h", all: true },
+      ]);
+    });
+
+    it("keeps the default GC policy when an older agent omits buildkitdConfig", async () => {
+      const result = await getStickyDiskWithAgentResponse({
+        exposeId: "expose-1",
+        diskIdentifier: "/dev/vdb",
+        parentSnapshotName: "snap-1",
+        cloneName: "clone-1",
+      });
+
+      expect(result.buildkitd_config.gcPolicy).toEqual([
+        { keepDuration: "192h", all: true },
+      ]);
+      expect(core.warning).not.toHaveBeenCalled();
+    });
   });
 
   describe("getNumCPUs", () => {

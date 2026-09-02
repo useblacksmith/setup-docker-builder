@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
+import * as fs from "fs";
 import { startBuildkitd } from "./setup_builder";
+import { buildkitdConfigFromServer } from "./server-config";
 import { execa } from "execa";
 
 vi.mock("@actions/core");
@@ -178,5 +180,51 @@ describe("driver-opts parsing", () => {
     expect(commandCall).toContain("SPECIAL_CHARS='value with spaces'");
     expect(commandCall).toContain("QUOTES='value'with'quotes'");
     expect(commandCall).toContain("EQUALS='key=value'");
+  });
+});
+
+describe("buildkitd.toml GC policy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(execa).mockReturnValue({
+      on: vi.fn(),
+      stdout: { pipe: vi.fn() },
+      stderr: { pipe: vi.fn() },
+    } as unknown as ReturnType<typeof execa>);
+  });
+
+  function writtenBuildkitdToml(): string {
+    const call = vi
+      .mocked(fs.promises.writeFile)
+      .mock.calls.find(([path]) => path === "buildkitd.toml");
+    expect(call).toBeDefined();
+    return call![1] as string;
+  }
+
+  it("writes the 192h default when no server config is passed", async () => {
+    await startBuildkitd(4, "tcp://127.0.0.1:1234");
+
+    const toml = writtenBuildkitdToml();
+    expect(toml).toContain("gc = true");
+    expect(toml).toContain('keepDuration = "192h"');
+    expect(toml).toContain("all = true");
+    expect(toml).toContain("max-parallelism = 4");
+  });
+
+  it("writes the backend keepDuration when the agent supplied one", async () => {
+    await startBuildkitd(
+      4,
+      "tcp://127.0.0.1:1234",
+      undefined,
+      undefined,
+      buildkitdConfigFromServer(72n),
+    );
+
+    const toml = writtenBuildkitdToml();
+    expect(toml).toContain("gc = true");
+    expect(toml).toContain('keepDuration = "72h"');
+    expect(toml).not.toContain("192h");
+    expect(toml).toContain("all = true");
+    expect(toml).toContain("max-parallelism = 4");
   });
 });

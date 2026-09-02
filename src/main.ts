@@ -326,6 +326,7 @@ async function startBlacksmithBuilder(
         parallelism,
         buildkitdPath,
         inputs["driver-opts"],
+        stickyDiskSetup.buildkitdConfig,
       );
     } finally {
       const buildkitdDurationMs = Date.now() - buildkitdStartTime;

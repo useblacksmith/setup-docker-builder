@@ -52,6 +52,53 @@ export const DEFAULT_BUILDKITD_CONFIG: BuildkitdConfig = {
   ],
 };
 
+// Bounds for the backend-supplied GC keepDuration. Anything outside is
+// treated as a backend bug and ignored rather than written into buildkitd.toml.
+export const MIN_GC_KEEP_DURATION_HOURS = 1;
+export const MAX_GC_KEEP_DURATION_HOURS = 8760;
+
+/**
+ * Builds the buildkitd config for this job from the GC keepDuration (whole
+ * hours) the backend attached to the sticky disk. The backend only overrides
+ * the TTL; every other default is kept. Missing or invalid values yield
+ * DEFAULT_BUILDKITD_CONFIG so an old agent/backend, or a bad rollout value,
+ * never changes GC behavior.
+ */
+export function buildkitdConfigFromServer(
+  gcKeepDurationHours: bigint | number | undefined,
+): BuildkitdConfig {
+  if (gcKeepDurationHours === undefined || gcKeepDurationHours === 0) {
+    core.info(
+      `No buildkitd GC policy from backend; using default keepDuration ${DEFAULT_BUILDKITD_CONFIG.gcPolicy?.[0]?.keepDuration}`,
+    );
+    return DEFAULT_BUILDKITD_CONFIG;
+  }
+
+  const hours = Number(gcKeepDurationHours);
+  if (
+    !Number.isInteger(hours) ||
+    hours < MIN_GC_KEEP_DURATION_HOURS ||
+    hours > MAX_GC_KEEP_DURATION_HOURS
+  ) {
+    core.warning(
+      `Ignoring invalid buildkitd GC keepDuration from backend: ${String(gcKeepDurationHours)}h ` +
+        `(expected ${MIN_GC_KEEP_DURATION_HOURS}-${MAX_GC_KEEP_DURATION_HOURS}); using default ` +
+        `${DEFAULT_BUILDKITD_CONFIG.gcPolicy?.[0]?.keepDuration}`,
+    );
+    return DEFAULT_BUILDKITD_CONFIG;
+  }
+
+  const keepDuration = `${hours}h`;
+  core.info(`Using backend buildkitd GC keepDuration ${keepDuration}`);
+  return {
+    ...DEFAULT_BUILDKITD_CONFIG,
+    gcPolicy: (DEFAULT_BUILDKITD_CONFIG.gcPolicy ?? []).map((policy) => ({
+      ...policy,
+      keepDuration,
+    })),
+  };
+}
+
 /**
  * Runs an ordered list of pre-commit hooks. Returns whether the commit
  * should proceed based on hook results and their failure modes.
