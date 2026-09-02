@@ -198,7 +198,7 @@ async function writeTomlConfig(
   }
 }
 
-async function writeBuildkitdTomlFile(
+export async function writeBuildkitdTomlFile(
   parallelism: number,
   addr: string,
   dnsNameservers: string[],
@@ -237,6 +237,11 @@ async function writeBuildkitdTomlFile(
         ...(gcPolicy && gcPolicy.length > 0 ? { gcpolicy: gcPolicy } : {}),
         "max-parallelism": effectiveParallelism,
         snapshotter: "overlayfs",
+        // Keep upstream prune semantics: `buildctl prune --all --keep-storage`
+        // must never remove layers that are still referenced (e.g. parents of
+        // surviving layers), otherwise buildkitd's cache graph is left with
+        // dangling parents. GC handles reclamation via gcpolicy instead.
+        pruneInUse: false,
       },
       containerd: {
         enabled: false,
@@ -572,36 +577,6 @@ export async function logBuildCacheContents(): Promise<void> {
     core.warning(
       `Error listing build cache contents: ${(error as Error).message}`,
     );
-  }
-}
-
-/**
- * Prunes buildkit cache data.
- * @param keepStorageMB Storage to retain in cache, in MB. Defaults to 20480 (20GB).
- * @throws Error if buildctl prune command fails
- */
-export async function pruneBuildkitCache(
-  keepStorageMB: number = 20480,
-): Promise<void> {
-  try {
-    const cmd = `sudo buildctl --addr ${BUILDKIT_DAEMON_ADDR} prune --all --keep-storage ${keepStorageMB}`;
-    const { stdout } = await execAsync(cmd);
-    const output = stdout.trim();
-    if (output) {
-      const lines = output.split("\n").filter((l) => l.trim());
-      const totalLine = lines.find((l) => l.toLowerCase().startsWith("total:"));
-      if (totalLine) {
-        core.info(`Build cache pruned: ${totalLine.trim()}`);
-      } else {
-        core.info(`Build cache pruned (${lines.length} entries reclaimed)`);
-      }
-      core.debug(`Prune output:\n${output}`);
-    } else {
-      core.info("Build cache pruned: no data reclaimed");
-    }
-  } catch (error) {
-    core.warning(`Error pruning buildkit cache: ${(error as Error).message}`);
-    throw error;
   }
 }
 

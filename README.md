@@ -48,17 +48,16 @@ This action follows semantic versioning and supports multiple referencing patter
 
 ## Inputs
 
-| Name                   | Description                                                                                                   | Required | Default        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
-| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                                        | No       | `v0.23.0`      |
-| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                                          | No       | System default |
-| `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                            | No       |                |
-| `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                    | No       | `false`        |
-| `github-token`         | GitHub token for GitHub API access                                                                            | No       |                |
-| `skip-integrity-check` | Deprecated: the bbolt database integrity check has been removed; this input has no effect                     | No       | `false`        |
-| `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
-| `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
-| `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
+| Name                   | Description                                                                                    | Required | Default        |
+| ---------------------- | ---------------------------------------------------------------------------------------------- | -------- | -------------- |
+| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                         | No       | `v0.23.0`      |
+| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                           | No       | System default |
+| `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                             | No       |                |
+| `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                     | No       | `false`        |
+| `github-token`         | GitHub token for GitHub API access                                                             | No       |                |
+| `skip-integrity-check` | Deprecated: the bbolt database integrity check has been removed; this input has no effect      | No       | `false`        |
+| `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                          | No       |                |
+| `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner | No       |                |
 
 ## Example Workflows
 
@@ -90,17 +89,7 @@ This action follows semantic versioning and supports multiple referencing patter
 
 ### Cache management
 
-Use `max-cache-size-mb` to automatically prune the BuildKit cache after each build, retaining the specified amount in MB. This prevents the cache from growing unbounded while keeping the most recent layers available. The layers will be trimmed based off of the last accessed timestamp stored in the cache manager.
-
-```yaml
-- uses: useblacksmith/setup-docker-builder@v1
-  with:
-    max-cache-size-mb: "409600" # retain up to 400 GB of build cache
-- uses: useblacksmith/build-push-action@v2
-  with:
-    push: true
-    tags: user/app:latest
-```
+buildkitd runs with garbage collection enabled and reclaims cache entries that have not been used for 8 days. There is no need to run `docker buildx prune` or `buildctl prune` inside the job; if you do, `prune --all --keep-storage` only removes layers that are no longer referenced, in least-recently-used order.
 
 ### Custom Docker commands
 
