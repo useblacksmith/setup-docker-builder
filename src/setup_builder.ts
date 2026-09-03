@@ -482,11 +482,7 @@ export async function getStickyDisk(options?: {
       : "",
     // Absent when the agent or backend predates the field; the default then applies.
     buildkitd_config: buildkitdConfigFromServer(
-      (
-        response as {
-          buildkitdConfig?: { gcKeepDurationHours?: bigint | number };
-        }
-      ).buildkitdConfig?.gcKeepDurationHours,
+      response.buildkitdConfig?.gcKeepDurationHours,
     ),
   };
 }
