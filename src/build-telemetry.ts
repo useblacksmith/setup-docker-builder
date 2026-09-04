@@ -32,7 +32,10 @@ import * as reporter from "./reporter";
 // bounded too.
 const MAX_TRACE_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = 512 * 1024;
-const MAX_TOTAL_PAYLOAD_BYTES = 8 * 1024 * 1024;
+// Job-wide bound on record + trace bytes across all report chunks. Sized so
+// many-build jobs (dozens of builds with ~1 MiB traces) ship whole; the
+// per-request budget below is what keeps individual RPCs small.
+const MAX_TOTAL_PAYLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_TIMELINE_BYTES = 1024 * 1024;
 // Per-request budget for ReportDockerBuild (timeline + records + traces).
 // The vm-agent's gRPC server rejects messages over its default 4 MiB recv
