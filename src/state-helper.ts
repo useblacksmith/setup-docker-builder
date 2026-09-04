@@ -56,6 +56,40 @@ export function getCacheKey(): string {
   return core.getState("cacheKey");
 }
 
+// Builder lifecycle facts recorded in the main step and read back in the
+// post step for the docker-build teardown report.
+export function setBuilderMode(mode: string) {
+  core.saveState("builderMode", mode);
+}
+
+export function getBuilderMode(): string {
+  return core.getState("builderMode");
+}
+
+export function setFallbackReason(reason: string) {
+  core.saveState("fallbackReason", reason);
+}
+
+export function getFallbackReason(): string {
+  return core.getState("fallbackReason");
+}
+
+export function setHotloadDurationMs(ms: number) {
+  core.saveState("hotloadDurationMs", ms.toString());
+}
+
+export function getHotloadDurationMs(): number {
+  return parseInt(core.getState("hotloadDurationMs"), 10) || 0;
+}
+
+export function setBuildkitdReadyDurationMs(ms: number) {
+  core.saveState("buildkitdReadyDurationMs", ms.toString());
+}
+
+export function getBuildkitdReadyDurationMs(): number {
+  return parseInt(core.getState("buildkitdReadyDurationMs"), 10) || 0;
+}
+
 let _sigkillUsed = false;
 
 export function setSigkillUsed(used: boolean) {
