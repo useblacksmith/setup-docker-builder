@@ -26,10 +26,27 @@ import {
   isBuildKitVersionInstalled,
 } from "./buildkit-installer";
 import { shutdownBuildkitd } from "./shutdown";
+import {
+  newJobLifecycle,
+  parseDuVerbose,
+  exportBuildHistory,
+  pruneBuildHistory,
+  readRunnerStepTimeline,
+  reportDockerBuild,
+  type ExportedBuild,
+  type JobLifecycle,
+} from "./build-telemetry";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
 import { runPreCommitHooks, type PrepareCommitResponse } from "./server-config";
-import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+import {
+  Metric_MetricType,
+  BuilderMode,
+  BuilderFallbackReason,
+  CommitDecision,
+  CommitSkipReason,
+  IntegrityOutcome,
+} from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
 const mountPoint = "/var/lib/buildkit";
@@ -263,6 +280,7 @@ function isValidBuildxVersion(version: string): boolean {
 async function startBlacksmithBuilder(
   inputs: Inputs,
 ): Promise<{ addr: string | null; exposeId: string }> {
+  let fallbackStage = "stickydisk-setup-failed";
   try {
     // If buildkitd is already running, skip - the builder is already initialized.
     try {
@@ -272,6 +290,8 @@ async function startBlacksmithBuilder(
           `Detected existing buildkitd process (PID: ${stdout.trim()}). ` +
             `Skipping builder setup - builder is already initialized.`,
         );
+        stateHelper.setBuilderMode("existing");
+        stateHelper.setFallbackReason("existing-builder");
         return { addr: null, exposeId: "" };
       }
     } catch (error) {
@@ -283,9 +303,11 @@ async function startBlacksmithBuilder(
     }
 
     // Setup sticky disk
+    fallbackStage = "stickydisk-setup-failed";
     const stickyDiskStartTime = Date.now();
     const stickyDiskSetup = await setupStickyDisk();
     const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
+    stateHelper.setHotloadDurationMs(stickyDiskDurationMs);
     await reporter.reportMetric(
       Metric_MetricType.BPA_HOTLOAD_DURATION_MS,
       stickyDiskDurationMs,
@@ -319,6 +341,7 @@ async function startBlacksmithBuilder(
     }
 
     // Start buildkitd
+    fallbackStage = "buildkitd-failed";
     const buildkitdStartTime = Date.now();
     let buildkitdAddr: string;
     try {
@@ -330,6 +353,7 @@ async function startBlacksmithBuilder(
       );
     } finally {
       const buildkitdDurationMs = Date.now() - buildkitdStartTime;
+      stateHelper.setBuildkitdReadyDurationMs(buildkitdDurationMs);
       await reporter.reportMetric(
         Metric_MetricType.BPA_BUILDKITD_READY_DURATION_MS,
         buildkitdDurationMs,
@@ -340,9 +364,12 @@ async function startBlacksmithBuilder(
     stateHelper.setCacheKey(core.getInput("cache-key"));
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
     stateHelper.setCommitEarlyDenyReason(stickyDiskSetup.commitEarlyDenyReason);
+    stateHelper.setBuilderMode("blacksmith-remote");
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
+    stateHelper.setBuilderMode("local-fallback");
+    stateHelper.setFallbackReason(fallbackStage);
     if (inputs.nofallback) {
       core.warning(
         `Error during Blacksmith builder setup: ${(error as Error).message}. Failing because nofallback is set.`,
@@ -362,12 +389,17 @@ async function startBlacksmithBuilder(
  * When setup is called multiple times in one job, only the first
  * instance starts buildkitd; subsequent instances reuse it and
  * should not shut it down.
+ *
+ * Returns the job's exported BuildKit history records, collected while
+ * buildkitd is still up.
  */
-async function maybeShutdownBuildkitd(): Promise<void> {
+async function maybeShutdownBuildkitd(
+  lifecycle: JobLifecycle,
+): Promise<ExportedBuild[]> {
   const buildkitdAddr = stateHelper.getBuildkitdAddr();
   if (!buildkitdAddr) {
     core.info("This instance did not start buildkitd, skipping shutdown");
-    return;
+    return [];
   }
 
   core.info(`buildkitd addr: ${buildkitdAddr}`);
@@ -389,7 +421,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
       "buildkitd process has crashed - expected to be running but not found",
     );
     await logBuildkitdLogTail();
-    return;
+    return [];
   }
 
   core.info(`buildkitd process: ${pid}`);
@@ -397,9 +429,33 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   // Diagnostic only: a failing `buildctl du` must not affect the commit.
   await logBuildCacheContents();
 
+  // Snapshot the cache store composition (per record type, per cache mount)
+  // while buildkitd is still up.
+  try {
+    const { stdout } = await execAsync(
+      `sudo buildctl --addr ${buildkitdAddr} du -v`,
+    );
+    lifecycle.du = parseDuVerbose(stdout);
+  } catch (error) {
+    core.debug(`Failed to snapshot buildctl du: ${(error as Error).message}`);
+  }
+
+  // Export this job's build history (raw record + trace bytes) and delete
+  // the records afterwards, before buildkitd shutdown and unmount, so the
+  // committed filesystem no longer references them: history.db stays bounded
+  // across runs and later jobs never re-export old records. This is a
+  // filesystem-level delete; freed blocks on the block device are not scrubbed.
+  const builds = await exportBuildHistory(buildkitdAddr, lifecycle);
+  await pruneBuildHistory(
+    buildkitdAddr,
+    builds.map((b) => b.ref),
+    lifecycle,
+  );
+
   const buildkitdShutdownStartTime = Date.now();
   const wasRunning = await shutdownBuildkitd();
   const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
+  lifecycle.buildkitdShutdownDurationMs = buildkitdShutdownDurationMs;
   await reporter.reportMetric(
     Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
     buildkitdShutdownDurationMs,
@@ -414,7 +470,7 @@ async function maybeShutdownBuildkitd(): Promise<void> {
       "buildkitd exited unexpectedly before shutdown; continuing with cleanup",
     );
     await logBuildkitdLogTail();
-    return;
+    return builds;
   }
 
   if (stateHelper.getSigkillUsed()) {
@@ -424,6 +480,42 @@ async function maybeShutdownBuildkitd(): Promise<void> {
   } else {
     core.info("Shutdown buildkitd gracefully");
   }
+
+  return builds;
+}
+
+function builderModeFromState(mode: string): BuilderMode {
+  switch (mode) {
+    case "blacksmith-remote":
+      return BuilderMode.BLACKSMITH_REMOTE;
+    case "local-fallback":
+      return BuilderMode.LOCAL_FALLBACK;
+    case "existing":
+      return BuilderMode.EXISTING;
+    default:
+      return BuilderMode.UNSPECIFIED;
+  }
+}
+
+function fallbackReasonFromState(reason: string): BuilderFallbackReason {
+  switch (reason) {
+    case "stickydisk-setup-failed":
+      return BuilderFallbackReason.STICKYDISK_SETUP_FAILED;
+    case "buildkitd-failed":
+      return BuilderFallbackReason.BUILDKITD_FAILED;
+    case "existing-builder":
+      return BuilderFallbackReason.EXISTING_BUILDER;
+    default:
+      return BuilderFallbackReason.UNSPECIFIED;
+  }
+}
+
+function setCommitSkipped(
+  lifecycle: JobLifecycle,
+  reason: CommitSkipReason,
+): void {
+  lifecycle.commitDecision = CommitDecision.SKIPPED;
+  lifecycle.commitSkipReason = reason;
 }
 
 void actionsToolkit.run(
@@ -590,12 +682,27 @@ void actionsToolkit.run(
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
 
+      const lifecycle = newJobLifecycle();
+      lifecycle.builderMode = builderModeFromState(
+        stateHelper.getBuilderMode(),
+      );
+      lifecycle.fallbackReason = fallbackReasonFromState(
+        stateHelper.getFallbackReason(),
+      );
+      lifecycle.hotloadDurationMs = stateHelper.getHotloadDurationMs();
+      lifecycle.buildkitdReadyDurationMs =
+        stateHelper.getBuildkitdReadyDurationMs();
+      // No database integrity check runs before commit; the disk is committed
+      // as-is after a clean buildkitd shutdown and unmount.
+      lifecycle.integrityOutcome = IntegrityOutcome.SKIPPED;
+      let exportedBuilds: ExportedBuild[] = [];
+
       try {
         // Step 1: Shut down buildkitd if this instance started it.
         // When setup is called multiple times in one job, only the first
         // instance starts buildkitd; subsequent instances reuse it and
         // should not shut it down.
-        await maybeShutdownBuildkitd();
+        exportedBuilds = await maybeShutdownBuildkitd(lifecycle);
 
         // Step 2: Sync and unmount sticky disk
         await execAsync("sync");
@@ -640,6 +747,8 @@ void actionsToolkit.run(
               );
             } else {
               fsDiskUsageBytes = usedBytes;
+              lifecycle.fsUsedBytes = usedBytes;
+              lifecycle.fsSizeBytes = sizeBytes;
               const usedGiB = (usedBytes / (1 << 30)).toFixed(2);
               const sizeGiB = (sizeBytes / (1 << 30)).toFixed(2);
               const usagePercent = ((usedBytes / sizeBytes) * 100).toFixed(1);
@@ -726,6 +835,7 @@ void actionsToolkit.run(
           core.info(
             `Skipping sticky disk commit: denied for this job (${commitEarlyDenyReason}); changes to the build cache are discarded`,
           );
+          setCommitSkipped(lifecycle, CommitSkipReason.SERVER_DECLINED);
         } else if (!cleanupError) {
           // Check if any previous steps failed or were cancelled
           core.info(
@@ -740,6 +850,7 @@ void actionsToolkit.run(
             core.warning(
               "Skipping sticky disk commit due to ambiguity in failure detection",
             );
+            setCommitSkipped(lifecycle, CommitSkipReason.AMBIGUOUS);
           } else if (failureCheck.hasFailures) {
             core.warning(
               `Found ${failureCheck.failedCount} failed/cancelled steps in previous workflow steps`,
@@ -754,10 +865,12 @@ void actionsToolkit.run(
             core.warning(
               "Skipping sticky disk commit due to previous step failures",
             );
+            setCommitSkipped(lifecycle, CommitSkipReason.STEP_FAILURES);
           } else if (stateHelper.getSigkillUsed()) {
             core.warning(
               "Skipping sticky disk commit because SIGKILL was used to terminate buildkitd - disk may be in a bad state",
             );
+            setCommitSkipped(lifecycle, CommitSkipReason.SIGKILL);
           } else {
             // No failures detected and cleanup was successful — proceed with commit flow.
             // Phase 3: call PrepareCommit RPC here to get shouldCommit + hooks from the
@@ -777,15 +890,20 @@ void actionsToolkit.run(
                     "Pre-commit hook indicated commit should be skipped",
                   );
                   commitDecision.shouldCommit = false;
+                  setCommitSkipped(lifecycle, CommitSkipReason.HOOK_SKIPPED);
                 }
               }
 
               if (!commitDecision.shouldCommit) {
                 core.info("Server indicated commit should be skipped");
+                if (lifecycle.commitDecision !== CommitDecision.SKIPPED) {
+                  setCommitSkipped(lifecycle, CommitSkipReason.SERVER_DECLINED);
+                }
               } else {
                 core.info(
                   "No previous step failures detected, committing sticky disk after successful cleanup",
                 );
+                lifecycle.commitDecision = CommitDecision.REQUESTED;
 
                 await reporter.commitStickyDisk(
                   exposeId,
@@ -808,12 +926,26 @@ void actionsToolkit.run(
           core.warning(
             `Skipping sticky disk commit due to cleanup error: ${cleanupError.message}`,
           );
+          setCommitSkipped(lifecycle, CommitSkipReason.CLEANUP_ERROR);
         }
       } else {
         core.warning(
           "Expose ID not found in state, skipping sticky disk commit",
         );
+        setCommitSkipped(lifecycle, CommitSkipReason.NO_EXPOSE);
       }
+
+      // Ship the structured teardown report (raw history records, runner
+      // step timeline, lifecycle facts) to the vm-agent. Fail-soft with
+      // bounded timeouts: telemetry never fails the customer job.
+      lifecycle.buildkitdSigkillUsed = stateHelper.getSigkillUsed();
+      const runnerStepTimeline = await readRunnerStepTimeline();
+      await reportDockerBuild(
+        exportedBuilds,
+        runnerStepTimeline,
+        lifecycle,
+        exposeId,
+      );
 
       // See main step: close gRPC client + force-exit to avoid ~30s hang.
       reporter.closeBlacksmithAgentClient();

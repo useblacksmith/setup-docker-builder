@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "ncc build src/main.ts -o dist --source-map --minify --license licenses.txt",
+    "generate": "buf generate",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -15,7 +16,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@buf/blacksmith_vm-agent.bufbuild_es": "2.14.1-20260904133914-c6beb298c70c.3",
+    "@buf/blacksmith_vm-agent.bufbuild_es": "2.14.1-20260904150200-8b3de9374f95.3",
     "@bufbuild/protobuf": "^2.14.1",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-node": "^2.1.1",
@@ -26,6 +27,8 @@
     "execa": "^9.5.2"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.72.0",
+    "@bufbuild/protoc-gen-es": "^2.14.1",
     "@eslint/js": "^9.29.0",
     "@tsconfig/node24": "^24.0.0",
     "@types/iarna__toml": "^2.0.5",
