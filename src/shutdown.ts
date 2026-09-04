@@ -5,7 +5,12 @@ import * as stateHelper from "./state-helper";
 
 const execAsync = promisify(exec);
 
-export async function shutdownBuildkitd(): Promise<void> {
+/**
+ * Stops buildkitd. Resolves to `false` when no buildkitd process existed by
+ * the time SIGTERM was sent (it already exited on its own); the sticky disk
+ * is still intact in that case and the caller decides how to report it.
+ */
+export async function shutdownBuildkitd(): Promise<boolean> {
   const gracefulTimeout = 30000; // 30 seconds for graceful shutdown.
   const forceTimeout = 5000; // 5 seconds for forced shutdown.
   const backoff = 300; // 300ms.
@@ -13,7 +18,16 @@ export async function shutdownBuildkitd(): Promise<void> {
   try {
     // Step 1: Try graceful shutdown with SIGTERM.
     core.info("Sending SIGTERM to buildkitd for graceful shutdown");
-    await execAsync(`sudo pkill -TERM buildkitd`);
+    try {
+      await execAsync(`sudo pkill -TERM buildkitd`);
+    } catch (error) {
+      if ((error as { code?: number }).code === 1) {
+        // pkill returns exit code 1 when no process matched.
+        core.warning("buildkitd is not running; nothing to shut down");
+        return false;
+      }
+      throw error;
+    }
 
     // Wait for graceful shutdown.
     const gracefulStartTime = Date.now();
@@ -28,7 +42,7 @@ export async function shutdownBuildkitd(): Promise<void> {
         if ((error as { code?: number }).code === 1) {
           // pgrep returns exit code 1 when no process is found, which means shutdown successful.
           core.info("buildkitd successfully shutdown gracefully");
-          return;
+          return true;
         }
         // Some other error occurred.
         throw error;
@@ -39,11 +53,19 @@ export async function shutdownBuildkitd(): Promise<void> {
     core.warning(
       `buildkitd did not shutdown gracefully after ${gracefulTimeout / 1000} seconds, forcing shutdown with SIGKILL`,
     );
+    try {
+      await execAsync(`sudo pkill -KILL buildkitd`);
+    } catch (error) {
+      if ((error as { code?: number }).code === 1) {
+        core.info("buildkitd exited before SIGKILL was sent");
+        return true;
+      }
+      throw error;
+    }
     core.warning(
       "Disk may be in a bad state after SIGKILL - will prevent sticky disk commit",
     );
     stateHelper.setSigkillUsed(true);
-    await execAsync(`sudo pkill -KILL buildkitd`);
 
     // Wait for forced shutdown.
     const forceStartTime = Date.now();
@@ -58,7 +80,7 @@ export async function shutdownBuildkitd(): Promise<void> {
         if ((error as { code?: number }).code === 1) {
           // Process is gone.
           core.warning("buildkitd was forcefully terminated with SIGKILL");
-          return;
+          return true;
         }
         // Some other error occurred.
         throw error;

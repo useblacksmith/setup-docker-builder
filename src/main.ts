@@ -392,15 +392,28 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   core.info(`buildkitd process: ${pid}`);
 
+  // Diagnostic only: a failing `buildctl du` must not affect the commit.
   await logBuildCacheContents();
 
   const buildkitdShutdownStartTime = Date.now();
-  await shutdownBuildkitd();
+  const wasRunning = await shutdownBuildkitd();
   const buildkitdShutdownDurationMs = Date.now() - buildkitdShutdownStartTime;
   await reporter.reportMetric(
     Metric_MetricType.BPA_BUILDKITD_SHUTDOWN_DURATION_MS,
     buildkitdShutdownDurationMs,
   );
+
+  if (!wasRunning) {
+    // buildkitd exited between the pgrep above and SIGTERM (e.g. it crashed
+    // while serving `buildctl du`). The build already finished and the disk
+    // is still mounted and consistent, so cleanup continues and the sticky
+    // disk is committed as usual.
+    core.warning(
+      "buildkitd exited unexpectedly before shutdown; continuing with cleanup",
+    );
+    await logBuildkitdLogTail();
+    return;
+  }
 
   if (stateHelper.getSigkillUsed()) {
     core.warning(

@@ -136,6 +136,24 @@ describe("setup_builder", () => {
     });
   });
 
+  describe("writeBuildkitdTomlFile", () => {
+    it("disables in-use pruning and enables GC in the oci worker config", async () => {
+      const writeFile = vi.mocked(fs.promises.writeFile);
+
+      await setupBuilder.writeBuildkitdTomlFile(4, "tcp://127.0.0.1:1234", [
+        "10.0.0.1",
+      ]);
+
+      expect(writeFile.mock.calls[0][0]).toBe("buildkitd.toml");
+      const config = writeFile.mock.calls[0][1] as string;
+      expect(config).toContain("[worker.oci]");
+      expect(config).toContain("pruneInUse = false");
+      expect(config).toContain("gc = true");
+      expect(config).toContain('keepDuration = "192h"');
+      expect(config).toContain("max-parallelism = 4");
+    });
+  });
+
   describe("logBuildCacheContents", () => {
     it("should log build cache contents from buildctl du", async () => {
       const exec = (await import("child_process")).exec as unknown as {
@@ -193,104 +211,6 @@ describe("setup_builder", () => {
       expect(core.warning).toHaveBeenCalledWith(
         expect.stringContaining("Error listing build cache contents"),
       );
-    });
-  });
-
-  describe("pruneBuildkitCache", () => {
-    it("should prune buildkit cache successfully and log reclaimed entries", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          if (cmd.includes("buildctl") && cmd.includes("prune")) {
-            cb(null, {
-              stdout:
-                "ID\tRECLAIMABLE\tSIZE\nabc123\ttrue\t50MB\nTotal:\t\t50MB\n",
-              stderr: "",
-            });
-          }
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache();
-      expect(core.info).toHaveBeenCalledWith(
-        "Build cache pruned: Total:\t\t50MB",
-      );
-    });
-
-    it("should include --keep-storage when provided", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      let capturedCmd = "";
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          capturedCmd = cmd;
-          cb(null, { stdout: "", stderr: "" });
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache(1000);
-      expect(capturedCmd).toContain("--keep-storage 1000");
-    });
-
-    it("should default to 20480 MB when no value provided", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      let capturedCmd = "";
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          capturedCmd = cmd;
-          cb(null, { stdout: "", stderr: "" });
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache();
-      expect(capturedCmd).toContain("--keep-storage 20480");
-    });
-
-    it("should log no data reclaimed when prune output is empty", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          if (cmd.includes("buildctl") && cmd.includes("prune")) {
-            cb(null, { stdout: "", stderr: "" });
-          }
-        },
-      );
-
-      await setupBuilder.pruneBuildkitCache();
-      expect(core.info).toHaveBeenCalledWith(
-        "Build cache pruned: no data reclaimed",
-      );
-    });
-
-    it("should handle prune errors", async () => {
-      const exec = (await import("child_process")).exec as unknown as {
-        mockImplementation: (
-          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
-        ) => void;
-      };
-      exec.mockImplementation(
-        (cmd: string, cb: (...args: unknown[]) => void) => {
-          cb(new Error("Prune failed"), null);
-        },
-      );
-
-      await expect(setupBuilder.pruneBuildkitCache()).rejects.toThrow();
-      expect(core.warning).toHaveBeenCalled();
     });
   });
 });
