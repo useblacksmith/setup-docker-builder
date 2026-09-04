@@ -29,14 +29,16 @@ import * as reporter from "./reporter";
 
 // Size caps: telemetry must never balloon teardown. Records over the cap ship
 // without their trace and are marked truncated; the report as a whole is
-// bounded too.
+// bounded too. Every cap that fires is accounted for in the job lifecycle
+// (timeline bytes/truncation, export bytes, per-reason drop counters) so
+// absent traces and unattributed builds can be explained from the data.
 const MAX_TRACE_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = 512 * 1024;
 // Job-wide bound on record + trace bytes across all report chunks. Sized so
 // many-build jobs (dozens of builds with ~1 MiB traces) ship whole; the
 // per-request budget below is what keeps individual RPCs small.
-const MAX_TOTAL_PAYLOAD_BYTES = 32 * 1024 * 1024;
-const MAX_TIMELINE_BYTES = 1024 * 1024;
+export const MAX_TOTAL_PAYLOAD_BYTES = 32 * 1024 * 1024;
+export const MAX_TIMELINE_BYTES = 1024 * 1024;
 // Per-request budget for ReportDockerBuild (timeline + records + traces).
 // The vm-agent's gRPC server rejects messages over its default 4 MiB recv
 // limit, so builds are chunked across multiple unary calls; 3 MiB leaves
@@ -92,6 +94,16 @@ export interface JobLifecycle {
   buildkitdSigkillUsed: boolean;
   historyExportTimedOut: boolean;
   historyPruneFailed: boolean;
+  // Runner step-timeline bytes shipped (after the tail cap) and whether the
+  // cap cut the head off.
+  timelineBytes: number;
+  timelineTruncated: boolean;
+  // Record + trace bytes exported across all chunks, and how many builds hit
+  // each cap. The counters are disjoint: a build lands in at most one.
+  historyExportBytes: number;
+  tracesDroppedOversize: number;
+  tracesDroppedPayloadCap: number;
+  recordsDroppedPayloadCap: number;
 }
 
 export function newJobLifecycle(): JobLifecycle {
@@ -113,7 +125,89 @@ export function newJobLifecycle(): JobLifecycle {
     buildkitdSigkillUsed: false,
     historyExportTimedOut: false,
     historyPruneFailed: false,
+    timelineBytes: 0,
+    timelineTruncated: false,
+    historyExportBytes: 0,
+    tracesDroppedOversize: 0,
+    tracesDroppedPayloadCap: 0,
+    recordsDroppedPayloadCap: 0,
   };
+}
+
+// --- Export caps -------------------------------------------------------------
+
+// Accumulated while collecting and copied onto the lifecycle only once the
+// export completes, so a timed-out export (which ships no builds) leaves
+// them at zero.
+export type ExportCounters = Pick<
+  JobLifecycle,
+  | "historyExportBytes"
+  | "tracesDroppedOversize"
+  | "tracesDroppedPayloadCap"
+  | "recordsDroppedPayloadCap"
+>;
+
+export function newExportCounters(): ExportCounters {
+  return {
+    historyExportBytes: 0,
+    tracesDroppedOversize: 0,
+    tracesDroppedPayloadCap: 0,
+    recordsDroppedPayloadCap: 0,
+  };
+}
+
+/**
+ * Applies the job-wide payload cap to a build that already passed the
+ * per-record/per-trace caps and charges it to the counters. `traceUnavailable`
+ * says the build had a trace that could not be shipped for a per-build
+ * reason (over the per-trace cap, or the content-store read failed).
+ *
+ * Returns false when the record itself does not fit: the build is dropped
+ * entirely and produces no row. When only the trace does not fit, the record
+ * still ships without it. Each build is counted under exactly one reason,
+ * whole-record drops taking precedence over trace drops.
+ */
+export function admitBuild(
+  build: ExportedBuild,
+  traceUnavailable: boolean,
+  counters: ExportCounters,
+): boolean {
+  const recordBytes = build.historyRecord.length;
+  if (counters.historyExportBytes + recordBytes > MAX_TOTAL_PAYLOAD_BYTES) {
+    counters.recordsDroppedPayloadCap++;
+    return false;
+  }
+  if (
+    build.trace.length > 0 &&
+    counters.historyExportBytes + recordBytes + build.trace.length >
+      MAX_TOTAL_PAYLOAD_BYTES
+  ) {
+    build.trace = new Uint8Array(0);
+    build.truncated = true;
+    counters.tracesDroppedPayloadCap++;
+  } else if (traceUnavailable) {
+    counters.tracesDroppedOversize++;
+  }
+  counters.historyExportBytes += recordBytes + build.trace.length;
+  return true;
+}
+
+/**
+ * Keeps the newest MAX_TIMELINE_BYTES of the runner step timeline (the
+ * newest lines matter most for attributing the last builds) and records the
+ * shipped size and whether the head was cut off in the lifecycle.
+ */
+export function capRunnerStepTimeline(
+  raw: Uint8Array,
+  lifecycle: JobLifecycle,
+): Uint8Array {
+  const timeline =
+    raw.length > MAX_TIMELINE_BYTES
+      ? new Uint8Array(raw.subarray(raw.length - MAX_TIMELINE_BYTES))
+      : raw;
+  lifecycle.timelineBytes = timeline.length;
+  lifecycle.timelineTruncated = raw.length > timeline.length;
+  return timeline;
 }
 
 // --- BuildKit history record inspection --------------------------------------
@@ -228,10 +322,13 @@ export async function exportBuildHistory(
       );
     };
 
-    const collect = async (): Promise<ExportedBuild[]> => {
+    const collect = async (): Promise<{
+      builds: ExportedBuild[];
+      counters: ExportCounters;
+    }> => {
       await finalizePendingTraces();
       const builds: ExportedBuild[] = [];
-      let totalBytes = 0;
+      const counters = newExportCounters();
       for await (const event of control.listenBuildHistory({
         EarlyExit: true,
       })) {
@@ -253,6 +350,7 @@ export async function exportBuildHistory(
           build.historyRecord = info.sanitized.subarray(0, MAX_RECORD_BYTES);
           build.truncated = true;
         }
+        let traceUnavailable = false;
         if (
           info.traceDigest &&
           info.traceSize > 0 &&
@@ -279,35 +377,32 @@ export async function exportBuildHistory(
             core.debug(
               `Failed to read trace ${info.traceDigest}: ${(error as Error).message}`,
             );
+            build.trace = new Uint8Array(0);
             build.truncated = true;
+            traceUnavailable = true;
           }
         } else if (info.traceDigest) {
           build.truncated = true;
+          traceUnavailable = true;
         }
-        const buildBytes = build.historyRecord.length + build.trace.length;
-        if (totalBytes + buildBytes > MAX_TOTAL_PAYLOAD_BYTES) {
-          build.trace = new Uint8Array(0);
-          build.truncated = true;
-          if (
-            totalBytes + build.historyRecord.length >
-            MAX_TOTAL_PAYLOAD_BYTES
-          ) {
-            core.debug("Build history payload cap reached, dropping record");
-            continue;
-          }
+        if (!admitBuild(build, traceUnavailable, counters)) {
+          core.debug("Build history payload cap reached, dropping record");
+          continue;
         }
-        totalBytes += build.historyRecord.length + build.trace.length;
         builds.push(build);
       }
-      return builds;
+      return { builds, counters };
     };
 
-    const builds = await withTimeout(
+    const { builds, counters } = await withTimeout(
       collect(),
       HISTORY_EXPORT_TIMEOUT_MS,
       "build history export",
     );
-    core.info(`Exported ${builds.length} BuildKit history record(s)`);
+    Object.assign(lifecycle, counters);
+    core.info(
+      `Exported ${builds.length} BuildKit history record(s) (${counters.historyExportBytes} bytes; dropped: ${counters.tracesDroppedOversize} oversize trace(s), ${counters.tracesDroppedPayloadCap} trace(s) and ${counters.recordsDroppedPayloadCap} record(s) at payload cap)`,
+    );
     return builds;
   } catch (error) {
     if ((error as Error).message?.includes("timed out")) {
@@ -474,10 +569,12 @@ export function parseHumanSize(value: string): number {
 
 /**
  * Reads the most recent runner Worker _diag log: the raw step timeline the
- * vm-agent parses to attribute builds to workflow steps. Ships raw (tail
- * beyond the cap is kept: the newest lines matter most). Never throws.
+ * vm-agent parses to attribute builds to workflow steps. Ships raw, capped to
+ * its tail (see capRunnerStepTimeline). Never throws.
  */
-export async function readRunnerStepTimeline(): Promise<Uint8Array> {
+export async function readRunnerStepTimeline(
+  lifecycle: JobLifecycle,
+): Promise<Uint8Array> {
   try {
     const cwd = process.cwd();
     let runnerBase: string;
@@ -497,10 +594,7 @@ export async function readRunnerStepTimeline(): Promise<Uint8Array> {
     const raw = await fs.readFile(
       path.join(diagPath, workerLogs[workerLogs.length - 1]),
     );
-    if (raw.length > MAX_TIMELINE_BYTES) {
-      return new Uint8Array(raw.subarray(raw.length - MAX_TIMELINE_BYTES));
-    }
-    return new Uint8Array(raw);
+    return capRunnerStepTimeline(new Uint8Array(raw), lifecycle);
   } catch (error) {
     core.debug(
       `Failed to read runner step timeline: ${(error as Error).message}`,
@@ -590,6 +684,12 @@ export async function reportDockerBuild(
       buildkitdSigkillUsed: lifecycle.buildkitdSigkillUsed,
       historyExportTimedOut: lifecycle.historyExportTimedOut,
       historyPruneFailed: lifecycle.historyPruneFailed,
+      timelineBytes: BigInt(lifecycle.timelineBytes),
+      timelineTruncated: lifecycle.timelineTruncated,
+      historyExportBytes: BigInt(lifecycle.historyExportBytes),
+      tracesDroppedOversize: lifecycle.tracesDroppedOversize,
+      tracesDroppedPayloadCap: lifecycle.tracesDroppedPayloadCap,
+      recordsDroppedPayloadCap: lifecycle.recordsDroppedPayloadCap,
     });
 
     // A build-less job still reports its lifecycle in a single request.

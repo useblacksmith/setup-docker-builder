@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@buf/blacksmith_vm-agent.bufbuild_es": "2.14.1-20260904150200-8b3de9374f95.3",
+    "@buf/blacksmith_vm-agent.bufbuild_es": "2.14.1-20260904184135-ab292bb91e69.3",
     "@bufbuild/protobuf": "^2.14.1",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-node": "^2.1.1",
