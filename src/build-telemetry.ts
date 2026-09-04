@@ -43,6 +43,7 @@ const MAX_TIMELINE_BYTES = 1024 * 1024;
 // still staying under the 4 MiB limit.
 const MAX_REQUEST_BYTES = 3 * 1024 * 1024;
 const HISTORY_EXPORT_TIMEOUT_MS = 15_000;
+const HISTORY_FINALIZE_TIMEOUT_MS = 5_000;
 const REPORT_TIMEOUT_MS = 10_000;
 
 export interface ExportedBuild {
@@ -171,6 +172,11 @@ async function withTimeout<T>(
  * record bytes (logs stripped) plus the solve-status trace attachment
  * fetched from buildkitd's content store. Failed builds are included;
  * builds still in flight are marked incomplete. Never throws.
+ *
+ * buildkitd attaches a build's trace asynchronously (up to 3s after the
+ * record completes), so completed records without a trace descriptor are
+ * finalized first (UpdateBuildHistory Finalize blocks until the trace is
+ * attached) and then re-read.
  */
 export async function exportBuildHistory(
   buildkitdAddr: string,
@@ -187,7 +193,40 @@ export async function exportBuildHistory(
     const control = createClient(Control, transport);
     const content = createClient(Content, transport);
 
+    const finalizePendingTraces = async (): Promise<void> => {
+      const pending: string[] = [];
+      for await (const event of control.listenBuildHistory({
+        EarlyExit: true,
+      })) {
+        const record = event.record;
+        if (
+          record !== undefined &&
+          record.Ref !== "" &&
+          record.CompletedAt !== undefined &&
+          record.trace === undefined
+        ) {
+          pending.push(record.Ref);
+        }
+      }
+      await Promise.all(
+        pending.map(async (ref) => {
+          try {
+            await withTimeout(
+              control.updateBuildHistory({ Ref: ref, Finalize: true }),
+              HISTORY_FINALIZE_TIMEOUT_MS,
+              `history finalize ${ref}`,
+            );
+          } catch (error) {
+            core.debug(
+              `Failed to finalize history record ${ref}: ${(error as Error).message}`,
+            );
+          }
+        }),
+      );
+    };
+
     const collect = async (): Promise<ExportedBuild[]> => {
+      await finalizePendingTraces();
       const builds: ExportedBuild[] = [];
       let totalBytes = 0;
       for await (const event of control.listenBuildHistory({
