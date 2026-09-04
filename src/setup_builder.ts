@@ -8,7 +8,11 @@ import { UserInputError } from "./user-input-error";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
-import { BuildkitdConfig, DEFAULT_BUILDKITD_CONFIG } from "./server-config";
+import {
+  BuildkitdConfig,
+  DEFAULT_BUILDKITD_CONFIG,
+  buildkitdConfigFromServer,
+} from "./server-config";
 
 // Constants for configuration.
 const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
@@ -277,13 +281,19 @@ export async function startBuildkitd(
   addr: string,
   buildkitdPath?: string,
   driverOpts?: string[],
+  serverConfig?: BuildkitdConfig,
 ): Promise<string> {
   try {
     // Configure systemd-resolved to listen on a routable address so BuildKit
     // build containers can use the host's DNS cache from any network namespace.
     await configureSystemdResolvedForBuildkit();
     const dnsNameservers = await getRoutableHostDns();
-    await writeBuildkitdTomlFile(parallelism, addr, dnsNameservers);
+    await writeBuildkitdTomlFile(
+      parallelism,
+      addr,
+      dnsNameservers,
+      serverConfig,
+    );
 
     // Parse driver-opts to extract environment variables
     const envVars: Record<string, string> = {};
@@ -421,6 +431,7 @@ export async function getStickyDisk(options?: {
   // Non-empty when the host already knows this job's commit will be denied
   // (e.g. branch protection) and its writes to the sticky disk discarded.
   commit_early_deny_reason: string;
+  buildkitd_config: BuildkitdConfig;
 }> {
   const cacheKey = core.getInput("cache-key");
   if (cacheKey === "") {
@@ -469,6 +480,10 @@ export async function getStickyDisk(options?: {
     commit_early_deny_reason: response.commitEarlyDeny
       ? response.commitEarlyDenyReason || "denied by host policy"
       : "",
+    // Absent when the agent or backend predates the field; the default then applies.
+    buildkitd_config: buildkitdConfigFromServer(
+      response.buildkitdConfig?.gcKeepDurationHours,
+    ),
   };
 }
 
@@ -498,6 +513,7 @@ export async function startAndConfigureBuildkitd(
   parallelism: number,
   buildkitdPath?: string,
   driverOpts?: string[],
+  serverConfig?: BuildkitdConfig,
 ): Promise<string> {
   // Use standard buildkitd address
   const buildkitdAddr = BUILDKIT_DAEMON_ADDR;
@@ -507,6 +523,7 @@ export async function startAndConfigureBuildkitd(
     buildkitdAddr,
     buildkitdPath,
     driverOpts,
+    serverConfig,
   );
   core.debug(`buildkitd daemon started at addr ${addr}`);
   stateHelper.setBuildkitdAddr(addr);
@@ -656,6 +673,7 @@ export async function setupStickyDisk(): Promise<{
   device: string;
   exposeId: string;
   commitEarlyDenyReason: string;
+  buildkitdConfig: BuildkitdConfig;
 }> {
   try {
     const controller = new AbortController();
@@ -740,7 +758,12 @@ export async function setupStickyDisk(): Promise<{
     // Log database file hashes after mount
     await logDatabaseHashes("after mount");
 
-    return { device, exposeId, commitEarlyDenyReason };
+    return {
+      device,
+      exposeId,
+      commitEarlyDenyReason,
+      buildkitdConfig: stickyDiskResponse.buildkitd_config,
+    };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
     // Unsupported environments are expected; don't report them as failures.
