@@ -12,17 +12,17 @@ importers:
         specifier: ^1.10.1
         version: 1.11.1
       '@buf/blacksmith_vm-agent.bufbuild_es':
-        specifier: 2.11.0-20260224204715-065f59654bc1.1
-        version: 2.11.0-20260224204715-065f59654bc1.1(@bufbuild/protobuf@2.11.0)
+        specifier: 2.14.1-20260904133914-c6beb298c70c.3
+        version: 2.14.1-20260904133914-c6beb298c70c.3(@bufbuild/protobuf@2.14.1)
       '@bufbuild/protobuf':
-        specifier: ^2.11.0
-        version: 2.11.0
+        specifier: ^2.14.1
+        version: 2.14.1
       '@connectrpc/connect':
         specifier: ^2.1.1
-        version: 2.1.1(@bufbuild/protobuf@2.11.0)
+        version: 2.1.1(@bufbuild/protobuf@2.14.1)
       '@connectrpc/connect-node':
         specifier: ^2.1.1
-        version: 2.1.1(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.11.0))
+        version: 2.1.1(@bufbuild/protobuf@2.14.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1))
       '@docker/actions-toolkit':
         specifier: 0.37.1
         version: 0.37.1
@@ -208,13 +208,16 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.11.0-20260224204715-065f59654bc1.1':
-    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.11.0-20260224204715-065f59654bc1.1.tgz}
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.14.1-20260904133914-c6beb298c70c.3':
+    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.14.1-20260904133914-c6beb298c70c.3.tgz}
     peerDependencies:
-      '@bufbuild/protobuf': ^2.11.0
+      '@bufbuild/protobuf': ^2.14.1
 
   '@bufbuild/protobuf@2.11.0':
     resolution: {integrity: sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ==}
+
+  '@bufbuild/protobuf@2.14.1':
+    resolution: {integrity: sha512-agRJn3+EJDUe8AvxTx/LnHA/GErvLE62pSaSk7+MwFOtOv8eWBu/qCq2qoZjBjVZ3C2aiFJCveuSs17KMkYGOw==}
 
   '@bufbuild/protoplugin@2.11.0':
     resolution: {integrity: sha512-lyZVNFUHArIOt4W0+dwYBe5GBwbKzbOy8ObaloEqsw9Mmiwv2O48TwddDoHN4itylC+BaEGqFdI1W8WQt2vWJQ==}
@@ -2428,11 +2431,13 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.11.0-20260224204715-065f59654bc1.1(@bufbuild/protobuf@2.11.0)':
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.14.1-20260904133914-c6beb298c70c.3(@bufbuild/protobuf@2.14.1)':
     dependencies:
-      '@bufbuild/protobuf': 2.11.0
+      '@bufbuild/protobuf': 2.14.1
 
   '@bufbuild/protobuf@2.11.0': {}
+
+  '@bufbuild/protobuf@2.14.1': {}
 
   '@bufbuild/protoplugin@2.11.0':
     dependencies:
@@ -2442,14 +2447,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@connectrpc/connect-node@2.1.1(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.11.0))':
+  '@connectrpc/connect-node@2.1.1(@bufbuild/protobuf@2.14.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1))':
     dependencies:
-      '@bufbuild/protobuf': 2.11.0
-      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.11.0)
+      '@bufbuild/protobuf': 2.14.1
+      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.14.1)
 
-  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.11.0)':
+  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1)':
     dependencies:
-      '@bufbuild/protobuf': 2.11.0
+      '@bufbuild/protobuf': 2.14.1
 
   '@docker/actions-toolkit@0.37.1':
     dependencies:
@@ -2781,7 +2786,7 @@ snapshots:
 
   '@protobuf-ts/plugin@2.11.1':
     dependencies:
-      '@bufbuild/protobuf': 2.11.0
+      '@bufbuild/protobuf': 2.14.1
       '@bufbuild/protoplugin': 2.11.0
       '@protobuf-ts/protoc': 2.11.1
       '@protobuf-ts/runtime': 2.11.1

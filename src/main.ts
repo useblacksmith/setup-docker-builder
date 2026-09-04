@@ -512,6 +512,7 @@ async function startBlacksmithBuilder(
 
     // Save state for post action
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
+    stateHelper.setCommitEarlyDenyReason(stickyDiskSetup.commitEarlyDenyReason);
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
@@ -905,7 +906,12 @@ void actionsToolkit.run(
 
       // Step 4: Check for previous step failures before committing
       if (exposeId) {
-        if (!cleanupError) {
+        const commitEarlyDenyReason = stateHelper.getCommitEarlyDenyReason();
+        if (commitEarlyDenyReason) {
+          core.info(
+            `Skipping sticky disk commit: denied for this job (${commitEarlyDenyReason}); changes to the build cache are discarded`,
+          );
+        } else if (!cleanupError) {
           // Check if any previous steps failed or were cancelled
           core.info(
             "Checking for previous step failures before committing sticky disk",

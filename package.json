@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@buf/blacksmith_vm-agent.bufbuild_es": "2.11.0-20260224204715-065f59654bc1.1",
-    "@bufbuild/protobuf": "^2.11.0",
+    "@buf/blacksmith_vm-agent.bufbuild_es": "2.14.1-20260904133914-c6beb298c70c.3",
+    "@bufbuild/protobuf": "^2.14.1",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-node": "^2.1.1",
     "@docker/actions-toolkit": "0.37.1",
