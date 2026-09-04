@@ -217,7 +217,9 @@ export async function commitStickyDisk(
 
     await agentClient.commitStickyDisk(commitRequest);
 
-    core.info("Successfully committed sticky disk");
+    // The host applies the commit at VM teardown, after this step has ended;
+    // this only confirms the request was accepted.
+    core.info("Sticky disk commit requested; applied at VM shutdown");
   } catch (error) {
     core.warning(`Failed to commit sticky disk: ${(error as Error).message}`);
     throw error;

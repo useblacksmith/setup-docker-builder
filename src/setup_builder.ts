@@ -418,6 +418,9 @@ export async function getStickyDisk(options?: {
   device: string;
   parent_snapshot_name: string;
   clone_name: string;
+  // Non-empty when the host already knows this job's commit will be denied
+  // (e.g. branch protection) and its writes to the sticky disk discarded.
+  commit_early_deny_reason: string;
 }> {
   const cacheKey = core.getInput("cache-key");
   if (cacheKey === "") {
@@ -463,6 +466,9 @@ export async function getStickyDisk(options?: {
     parent_snapshot_name:
       (response as { parentSnapshotName?: string }).parentSnapshotName || "",
     clone_name: (response as { cloneName?: string }).cloneName || "",
+    commit_early_deny_reason: response.commitEarlyDeny
+      ? response.commitEarlyDenyReason || "denied by host policy"
+      : "",
   };
 }
 
@@ -649,6 +655,7 @@ const stickyDiskTimeoutMs = 45000;
 export async function setupStickyDisk(): Promise<{
   device: string;
   exposeId: string;
+  commitEarlyDenyReason: string;
 }> {
   try {
     const controller = new AbortController();
@@ -664,8 +671,15 @@ export async function setupStickyDisk(): Promise<{
     const parentSnapshotName = stickyDiskResponse.parent_snapshot_name;
     const cloneName = stickyDiskResponse.clone_name;
 
+    const commitEarlyDenyReason = stickyDiskResponse.commit_early_deny_reason;
+
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
+    if (commitEarlyDenyReason !== "") {
+      core.notice(
+        `Sticky disk changes will not be committed for this job (${commitEarlyDenyReason}). The build cache is used as-is and any changes to it are discarded.`,
+      );
+    }
 
     if (device === "") {
       throw new Error("No device found in sticky disk response");
@@ -726,7 +740,7 @@ export async function setupStickyDisk(): Promise<{
     // Log database file hashes after mount
     await logDatabaseHashes("after mount");
 
-    return { device, exposeId };
+    return { device, exposeId, commitEarlyDenyReason };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
     // Unsupported environments are expected; don't report them as failures.
