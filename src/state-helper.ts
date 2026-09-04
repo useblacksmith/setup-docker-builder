@@ -40,6 +40,17 @@ export function getBuildkitdAddr(): string {
   return core.getState("buildkitdAddr");
 }
 
+// Set when buildkitd was already running at setup time, so this step reused
+// a builder (and sticky disk mount) owned by an earlier setup-docker-builder
+// step in the same job. Only the owning step's post action cleans them up.
+export function setReusedExistingBuilder(reused: boolean) {
+  core.saveState("reusedExistingBuilder", reused.toString());
+}
+
+export function getReusedExistingBuilder(): boolean {
+  return core.getState("reusedExistingBuilder") === "true";
+}
+
 export function setBuilderName(name: string) {
   core.saveState("builderName", name);
 }
