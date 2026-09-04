@@ -22,6 +22,16 @@ export function getExposeId(): string {
   return core.getState("exposeId");
 }
 
+// Reason the host gave at mount time for denying this job's sticky disk
+// commit (e.g. branch protection); empty when no denial was reported.
+export function setCommitEarlyDenyReason(reason: string) {
+  core.saveState("commitEarlyDenyReason", reason);
+}
+
+export function getCommitEarlyDenyReason(): string {
+  return core.getState("commitEarlyDenyReason");
+}
+
 export function setBuildkitdAddr(addr: string) {
   core.saveState("buildkitdAddr", addr);
 }
