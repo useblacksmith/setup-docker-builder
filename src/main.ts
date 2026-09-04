@@ -518,6 +518,38 @@ function setCommitSkipped(
   lifecycle.commitSkipReason = reason;
 }
 
+function removeTmpDir(): void {
+  if (stateHelper.tmpDir.length === 0) {
+    return;
+  }
+  try {
+    fs.rmSync(stateHelper.tmpDir, { recursive: true });
+    core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
+  } catch (error) {
+    core.warning(
+      `Failed to remove temp directory: ${(error as Error).message}`,
+    );
+  }
+}
+
+// Ship the structured teardown report (raw history records, runner
+// step timeline, lifecycle facts) to the vm-agent. Fail-soft with
+// bounded timeouts: telemetry never fails the customer job.
+async function shipTeardownReport(
+  lifecycle: JobLifecycle,
+  exportedBuilds: ExportedBuild[],
+  exposeId: string,
+): Promise<void> {
+  lifecycle.buildkitdSigkillUsed = stateHelper.getSigkillUsed();
+  const runnerStepTimeline = await readRunnerStepTimeline(lifecycle);
+  await reportDockerBuild(
+    exportedBuilds,
+    runnerStepTimeline,
+    lifecycle,
+    exposeId,
+  );
+}
+
 void actionsToolkit.run(
   // main action
   async () => {
@@ -697,11 +729,20 @@ void actionsToolkit.run(
       lifecycle.integrityOutcome = IntegrityOutcome.SKIPPED;
       let exportedBuilds: ExportedBuild[] = [];
 
+      if (stateHelper.getBuilderMode() === "existing") {
+        core.info(
+          "This instance reused a builder started by an earlier setup-docker-builder step; " +
+            "skipping cleanup since that step's post action shuts down buildkitd and unmounts the sticky disk",
+        );
+        removeTmpDir();
+        setCommitSkipped(lifecycle, CommitSkipReason.NO_EXPOSE);
+        await shipTeardownReport(lifecycle, exportedBuilds, exposeId);
+        reporter.closeBlacksmithAgentClient();
+        return;
+      }
+
       try {
         // Step 1: Shut down buildkitd if this instance started it.
-        // When setup is called multiple times in one job, only the first
-        // instance starts buildkitd; subsequent instances reuse it and
-        // should not shut it down.
         exportedBuilds = await maybeShutdownBuildkitd(lifecycle);
 
         // Step 2: Sync and unmount sticky disk
@@ -804,17 +845,7 @@ void actionsToolkit.run(
         }
 
         // Step 3: Clean up temp directory (non-critical)
-        if (stateHelper.tmpDir.length > 0) {
-          try {
-            fs.rmSync(stateHelper.tmpDir, { recursive: true });
-            core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
-          } catch (error) {
-            core.warning(
-              `Failed to remove temp directory: ${(error as Error).message}`,
-            );
-            // Don't fail cleanup for temp directory removal
-          }
-        }
+        removeTmpDir();
 
         // If we made it here, all critical cleanup steps succeeded
         core.info("All critical cleanup steps completed successfully");
@@ -935,17 +966,7 @@ void actionsToolkit.run(
         setCommitSkipped(lifecycle, CommitSkipReason.NO_EXPOSE);
       }
 
-      // Ship the structured teardown report (raw history records, runner
-      // step timeline, lifecycle facts) to the vm-agent. Fail-soft with
-      // bounded timeouts: telemetry never fails the customer job.
-      lifecycle.buildkitdSigkillUsed = stateHelper.getSigkillUsed();
-      const runnerStepTimeline = await readRunnerStepTimeline(lifecycle);
-      await reportDockerBuild(
-        exportedBuilds,
-        runnerStepTimeline,
-        lifecycle,
-        exposeId,
-      );
+      await shipTeardownReport(lifecycle, exportedBuilds, exposeId);
 
       // See main step: close gRPC client + force-exit to avoid ~30s hang.
       reporter.closeBlacksmithAgentClient();
