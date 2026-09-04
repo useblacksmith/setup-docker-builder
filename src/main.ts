@@ -939,7 +939,7 @@ void actionsToolkit.run(
       // step timeline, lifecycle facts) to the vm-agent. Fail-soft with
       // bounded timeouts: telemetry never fails the customer job.
       lifecycle.buildkitdSigkillUsed = stateHelper.getSigkillUsed();
-      const runnerStepTimeline = await readRunnerStepTimeline();
+      const runnerStepTimeline = await readRunnerStepTimeline(lifecycle);
       await reportDockerBuild(
         exportedBuilds,
         runnerStepTimeline,
