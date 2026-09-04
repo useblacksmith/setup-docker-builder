@@ -34,6 +34,14 @@ const MAX_TRACE_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = 512 * 1024;
 const MAX_TOTAL_PAYLOAD_BYTES = 8 * 1024 * 1024;
 const MAX_TIMELINE_BYTES = 1024 * 1024;
+// Per-request budget for ReportDockerBuild (timeline + records + traces).
+// The vm-agent's gRPC server rejects messages over its default 4 MiB recv
+// limit, so builds are chunked across multiple unary calls; 3 MiB leaves
+// headroom for proto framing and the lifecycle message. A chunk always
+// carries at least one build, so a single build at the per-record/trace
+// caps (~2.5 MiB) plus the timeline can slightly exceed the budget while
+// still staying under the 4 MiB limit.
+const MAX_REQUEST_BYTES = 3 * 1024 * 1024;
 const HISTORY_EXPORT_TIMEOUT_MS = 15_000;
 const REPORT_TIMEOUT_MS = 10_000;
 
@@ -462,10 +470,44 @@ export async function readRunnerStepTimeline(): Promise<Uint8Array> {
 // --- Report -------------------------------------------------------------------
 
 /**
+ * Splits builds into chunks whose payload bytes (records + traces) fit the
+ * per-request budget alongside the timeline, which ships in every request
+ * (workflow-step attribution is per-request server-side). Every chunk
+ * carries at least one build.
+ */
+export function chunkBuilds(
+  builds: ExportedBuild[],
+  timelineBytes: number,
+): ExportedBuild[][] {
+  const budget = Math.max(MAX_REQUEST_BYTES - timelineBytes, 0);
+  const chunks: ExportedBuild[][] = [];
+  let current: ExportedBuild[] = [];
+  let currentBytes = 0;
+  for (const b of builds) {
+    const buildBytes = b.historyRecord.length + b.trace.length;
+    if (current.length > 0 && currentBytes + buildBytes > budget) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(b);
+    currentBytes += buildBytes;
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+/**
  * Sends the structured docker-build teardown report to the vm-agent over the
- * shared agent client (BLACKSMITH_AGENT_ADDR discovery). docker_build_ids are
- * issued host-side and returned in the response. Fail-soft: telemetry must
- * never fail the customer job.
+ * shared agent client (BLACKSMITH_AGENT_ADDR discovery), chunked across
+ * multiple unary ReportDockerBuild calls so no request exceeds the agent's
+ * gRPC recv limit. The runner step timeline ships in every chunk; the
+ * lifecycle message ships only in the first (the agent emits lifecycle
+ * metrics per request that carries it). docker_build_ids are issued
+ * host-side and returned per response. Fail-soft: telemetry must never fail
+ * the customer job.
  */
 export async function reportDockerBuild(
   builds: ExportedBuild[],
@@ -476,61 +518,72 @@ export async function reportDockerBuild(
   try {
     const client = reporter.createBlacksmithAgentClient();
 
-    const request = create(ReportDockerBuildRequestSchema, {
-      vmId: process.env.BLACKSMITH_VM_ID || "",
-      exposeId,
-      builds: builds.map((b) =>
-        create(DockerBuildRecordSchema, {
-          historyRecord: b.historyRecord,
-          trace: b.trace,
-          incomplete: b.incomplete,
-          truncated: b.truncated,
+    const lifecycleMessage = create(DockerJobLifecycleSchema, {
+      builderMode: lifecycle.builderMode,
+      fallbackReason: lifecycle.fallbackReason,
+      commitDecision: lifecycle.commitDecision,
+      commitSkipReason: lifecycle.commitSkipReason,
+      integrityOutcome: lifecycle.integrityOutcome,
+      integrityDurationMs: BigInt(lifecycle.integrityDurationMs),
+      duTotalBytes: BigInt(lifecycle.du?.totalBytes ?? 0),
+      duCacheMountBytes: BigInt(lifecycle.du?.cacheMountBytes ?? 0),
+      duLayersBytes: BigInt(lifecycle.du?.layersBytes ?? 0),
+      duSourceLocalBytes: BigInt(lifecycle.du?.sourceLocalBytes ?? 0),
+      cacheMounts: (lifecycle.du?.cacheMounts ?? []).map((m) =>
+        create(CacheMountUsageSchema, {
+          mountId: m.mountId,
+          bytes: BigInt(m.bytes),
+          records: BigInt(m.records),
         }),
       ),
-      runnerStepTimeline,
-      lifecycle: create(DockerJobLifecycleSchema, {
-        builderMode: lifecycle.builderMode,
-        fallbackReason: lifecycle.fallbackReason,
-        commitDecision: lifecycle.commitDecision,
-        commitSkipReason: lifecycle.commitSkipReason,
-        integrityOutcome: lifecycle.integrityOutcome,
-        integrityDurationMs: BigInt(lifecycle.integrityDurationMs),
-        duTotalBytes: BigInt(lifecycle.du?.totalBytes ?? 0),
-        duCacheMountBytes: BigInt(lifecycle.du?.cacheMountBytes ?? 0),
-        duLayersBytes: BigInt(lifecycle.du?.layersBytes ?? 0),
-        duSourceLocalBytes: BigInt(lifecycle.du?.sourceLocalBytes ?? 0),
-        cacheMounts: (lifecycle.du?.cacheMounts ?? []).map((m) =>
-          create(CacheMountUsageSchema, {
-            mountId: m.mountId,
-            bytes: BigInt(m.bytes),
-            records: BigInt(m.records),
-          }),
-        ),
-        fsUsedBytes: BigInt(lifecycle.fsUsedBytes),
-        fsSizeBytes: BigInt(lifecycle.fsSizeBytes),
-        pruneTriggered: lifecycle.pruneTriggered,
-        pruneBytes: BigInt(lifecycle.pruneBytes),
-        hotloadDurationMs: BigInt(lifecycle.hotloadDurationMs),
-        buildkitdReadyDurationMs: BigInt(lifecycle.buildkitdReadyDurationMs),
-        buildkitdShutdownDurationMs: BigInt(
-          lifecycle.buildkitdShutdownDurationMs,
-        ),
-        buildkitdSigkillUsed: lifecycle.buildkitdSigkillUsed,
-        historyExportTimedOut: lifecycle.historyExportTimedOut,
-        historyPruneFailed: lifecycle.historyPruneFailed,
-      }),
-      gitSha: process.env.GITHUB_SHA || "",
-      gitBranch: process.env.GITHUB_REF_NAME || "",
+      fsUsedBytes: BigInt(lifecycle.fsUsedBytes),
+      fsSizeBytes: BigInt(lifecycle.fsSizeBytes),
+      pruneTriggered: lifecycle.pruneTriggered,
+      pruneBytes: BigInt(lifecycle.pruneBytes),
+      hotloadDurationMs: BigInt(lifecycle.hotloadDurationMs),
+      buildkitdReadyDurationMs: BigInt(lifecycle.buildkitdReadyDurationMs),
+      buildkitdShutdownDurationMs: BigInt(
+        lifecycle.buildkitdShutdownDurationMs,
+      ),
+      buildkitdSigkillUsed: lifecycle.buildkitdSigkillUsed,
+      historyExportTimedOut: lifecycle.historyExportTimedOut,
+      historyPruneFailed: lifecycle.historyPruneFailed,
     });
 
-    const response = await withTimeout(
-      client.reportDockerBuild(request),
-      REPORT_TIMEOUT_MS,
-      "docker build report",
-    );
-    if (response.dockerBuildIds.length > 0) {
+    // A build-less job still reports its lifecycle in a single request.
+    const chunks =
+      builds.length > 0 ? chunkBuilds(builds, runnerStepTimeline.length) : [[]];
+
+    const dockerBuildIds: string[] = [];
+    for (const [i, chunk] of chunks.entries()) {
+      const request = create(ReportDockerBuildRequestSchema, {
+        vmId: process.env.BLACKSMITH_VM_ID || "",
+        exposeId,
+        builds: chunk.map((b) =>
+          create(DockerBuildRecordSchema, {
+            historyRecord: b.historyRecord,
+            trace: b.trace,
+            incomplete: b.incomplete,
+            truncated: b.truncated,
+          }),
+        ),
+        runnerStepTimeline,
+        ...(i === 0 ? { lifecycle: lifecycleMessage } : {}),
+        gitSha: process.env.GITHUB_SHA || "",
+        gitBranch: process.env.GITHUB_REF_NAME || "",
+      });
+
+      const response = await withTimeout(
+        client.reportDockerBuild(request),
+        REPORT_TIMEOUT_MS,
+        `docker build report (chunk ${i + 1}/${chunks.length})`,
+      );
+      dockerBuildIds.push(...response.dockerBuildIds);
+    }
+
+    if (dockerBuildIds.length > 0) {
       core.info(
-        `Reported ${builds.length} docker build(s): ${response.dockerBuildIds.join(", ")}`,
+        `Reported ${builds.length} docker build(s) in ${chunks.length} request(s): ${dockerBuildIds.join(", ")}`,
       );
     } else {
       core.info("Reported docker job lifecycle");
