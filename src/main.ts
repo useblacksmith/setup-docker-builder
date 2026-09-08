@@ -439,6 +439,7 @@ async function startBlacksmithBuilder(
           `Detected existing buildkitd process (PID: ${stdout.trim()}). ` +
             `Skipping builder setup - builder is already initialized.`,
         );
+        stateHelper.setReusedExistingBuilder(true);
         return { addr: null, exposeId: "" };
       }
     } catch (error) {
@@ -527,6 +528,20 @@ async function startBlacksmithBuilder(
       `Error during Blacksmith builder setup: ${(error as Error).message}. Falling back to local builder.`,
     );
     return { addr: null, exposeId: "" };
+  }
+}
+
+function removeTmpDir(): void {
+  if (stateHelper.tmpDir.length === 0) {
+    return;
+  }
+  try {
+    fs.rmSync(stateHelper.tmpDir, { recursive: true });
+    core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
+  } catch (error) {
+    core.warning(
+      `Failed to remove temp directory: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -766,6 +781,16 @@ void actionsToolkit.run(
   // post action - cleanup
   async () => {
     await core.group("Cleaning up Docker builder", async () => {
+      if (stateHelper.getReusedExistingBuilder()) {
+        core.info(
+          "This instance reused a builder started by an earlier setup-docker-builder step; " +
+            "skipping cleanup since that step's post action shuts down buildkitd and unmounts the sticky disk",
+        );
+        removeTmpDir();
+        reporter.closeBlacksmithAgentClient();
+        return;
+      }
+
       const exposeId = stateHelper.getExposeId();
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
@@ -773,9 +798,6 @@ void actionsToolkit.run(
 
       try {
         // Step 1: Shut down buildkitd if this instance started it.
-        // When setup is called multiple times in one job, only the first
-        // instance starts buildkitd; subsequent instances reuse it and
-        // should not shut it down.
         await maybeShutdownBuildkitd();
 
         // Step 2: Sync and unmount sticky disk
@@ -880,17 +902,7 @@ void actionsToolkit.run(
         }
 
         // Step 3: Clean up temp directory (non-critical)
-        if (stateHelper.tmpDir.length > 0) {
-          try {
-            fs.rmSync(stateHelper.tmpDir, { recursive: true });
-            core.debug(`Removed temp folder ${stateHelper.tmpDir}`);
-          } catch (error) {
-            core.warning(
-              `Failed to remove temp directory: ${(error as Error).message}`,
-            );
-            // Don't fail cleanup for temp directory removal
-          }
-        }
+        removeTmpDir();
 
         // If we made it here, all critical cleanup steps succeeded
         core.info("All critical cleanup steps completed successfully");
