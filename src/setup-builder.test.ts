@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as core from "@actions/core";
 import * as fs from "fs";
 import * as setupBuilder from "./setup_builder";
-// import * as reporter from "./reporter";
+import * as reporter from "./reporter";
+import { Code, ConnectError } from "@connectrpc/connect";
 
 // Mock the modules
 vi.mock("@actions/core", () => ({
@@ -46,6 +47,58 @@ describe("setup_builder", () => {
     process.env.GITHUB_REPO_NAME = "test-repo";
     process.env.BLACKSMITH_REGION = "eu-central";
     process.env.BLACKSMITH_VM_ID = "test-vm-id";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("getStickyDisk", () => {
+    it("retries transient 503 responses", async () => {
+      vi.useFakeTimers();
+      const getStickyDisk = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new ConnectError(
+            "failed to expose and mount sticky disk: unexpected status code: 503",
+            Code.Unknown,
+          ),
+        )
+        .mockResolvedValue({
+          exposeId: "expose-1",
+          diskIdentifier: "/dev/vdb",
+        });
+      vi.mocked(reporter.createBlacksmithAgentClient).mockResolvedValue({
+        up: vi.fn(),
+        getStickyDisk,
+      } as never);
+
+      const resultPromise = setupBuilder.getStickyDisk();
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toMatchObject({
+        expose_id: "expose-1",
+        device: "/dev/vdb",
+      });
+      expect(getStickyDisk).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not retry 500 responses", async () => {
+      const getStickyDisk = vi
+        .fn()
+        .mockRejectedValue(
+          new ConnectError("unexpected status code: 500", Code.Unknown),
+        );
+      vi.mocked(reporter.createBlacksmithAgentClient).mockResolvedValue({
+        up: vi.fn(),
+        getStickyDisk,
+      } as never);
+
+      await expect(setupBuilder.getStickyDisk()).rejects.toThrow(
+        "unexpected status code: 500",
+      );
+      expect(getStickyDisk).toHaveBeenCalledOnce();
+    });
   });
 
   describe("getNumCPUs", () => {

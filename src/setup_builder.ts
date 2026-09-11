@@ -7,6 +7,7 @@ import * as reporter from "./reporter";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
+import { Code, ConnectError } from "@connectrpc/connect";
 
 // Constants for configuration.
 const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
@@ -415,20 +416,42 @@ export async function getStickyDisk(options?: {
   }
   core.info(`Getting sticky disk for ${stickyDiskKey}`);
 
-  const response = await client.getStickyDisk(
-    {
-      stickyDiskKey: stickyDiskKey,
-      region: process.env.BLACKSMITH_REGION || "eu-central",
-      installationModelId: process.env.BLACKSMITH_INSTALLATION_MODEL_ID || "",
-      vmId: process.env.BLACKSMITH_VM_ID || "",
-      stickyDiskType: "dockerfile",
-      repoName: process.env.GITHUB_REPO_NAME || "",
-      stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
-    },
-    {
-      signal: options?.signal,
-    },
-  );
+  const request = {
+    stickyDiskKey,
+    region: process.env.BLACKSMITH_REGION || "eu-central",
+    installationModelId: process.env.BLACKSMITH_INSTALLATION_MODEL_ID || "",
+    vmId: process.env.BLACKSMITH_VM_ID || "",
+    stickyDiskType: "dockerfile",
+    repoName: process.env.GITHUB_REPO_NAME || "",
+    stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
+  };
+
+  let response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      response = await client.getStickyDisk(request, {
+        signal: options?.signal,
+      });
+      break;
+    } catch (error) {
+      const connectError = ConnectError.from(error);
+      const retryable =
+        connectError.code === Code.Unavailable ||
+        /unexpected status code: 50[234]\b/.test(connectError.rawMessage);
+      if (!retryable || attempt === 3 || options?.signal?.aborted) {
+        throw error;
+      }
+
+      const delayMs = attempt * 500;
+      core.warning(
+        `Sticky disk request failed (attempt ${attempt}/3), retrying in ${delayMs}ms: ${connectError.rawMessage}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (options?.signal?.aborted) {
+        throw error;
+      }
+    }
+  }
   return {
     expose_id: (response as { exposeId?: string }).exposeId || "",
     device: (response as { diskIdentifier?: string }).diskIdentifier || "",
