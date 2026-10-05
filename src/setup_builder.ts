@@ -644,6 +644,26 @@ export async function logDatabaseHashes(label: string): Promise<void> {
   }
 }
 
+// buildkitd deletes <root>/runc-*/executor/{hosts,resolv.conf} on startup but
+// not resolv-host.conf, the resolv.conf it bind-mounts into --network=host RUN
+// containers. After the daemon's first container it keeps a saved
+// resolv-host.conf whenever its mtime is newer than /etc/resolv.conf, which on
+// these VMs is boot time. On a sticky disk the saved file came from whichever
+// VM last committed and names that VM's eth0 address as nameserver, which is
+// unreachable here, so every lookup inside host-network RUNs times out. Drop
+// it so this daemon writes one with its own address.
+export async function discardPersistedHostResolvConf(): Promise<void> {
+  try {
+    await execAsync(
+      `sudo sh -c 'rm -f ${mountPoint}/runc-*/executor/resolv-host.conf'`,
+    );
+  } catch (error) {
+    core.warning(
+      `Failed to discard persisted BuildKit resolv-host.conf: ${(error as Error).message}`,
+    );
+  }
+}
+
 // stickyDiskTimeoutMs states the max amount of time this action will wait for the VM agent to
 // expose the sticky disk from the storage agent, map it onto the host and then patch the drive
 // into the VM.
@@ -693,6 +713,8 @@ export async function setupStickyDisk(): Promise<{
     await execAsync(`sudo mount -o noinit_itable ${device} ${mountPoint}`);
     core.debug(`${device} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
+
+    await discardPersistedHostResolvConf();
 
     // Log filesystem free space after mount
     try {

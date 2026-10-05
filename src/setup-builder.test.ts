@@ -262,4 +262,49 @@ describe("setup_builder", () => {
       expect(core.warning).toHaveBeenCalled();
     });
   });
+
+  describe("discardPersistedHostResolvConf", () => {
+    it("removes the executor resolv-host.conf as root so the glob expands", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mock: { calls: [string][] };
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(null, { stdout: "", stderr: "" });
+        },
+      );
+
+      await setupBuilder.discardPersistedHostResolvConf();
+
+      const cmd = exec.mock.calls.at(-1)?.[0];
+      expect(cmd).toMatch(/^sudo sh -c 'rm -f /);
+      expect(cmd).toContain(
+        "/var/lib/buildkit/runc-*/executor/resolv-host.conf",
+      );
+      expect(core.warning).not.toHaveBeenCalled();
+    });
+
+    it("warns instead of failing the job when the removal errors", async () => {
+      const exec = (await import("child_process")).exec as unknown as {
+        mockImplementation: (
+          fn: (cmd: string, cb: (...args: unknown[]) => void) => void,
+        ) => void;
+      };
+      exec.mockImplementation(
+        (cmd: string, cb: (...args: unknown[]) => void) => {
+          cb(new Error("rm: permission denied"), null);
+        },
+      );
+
+      await expect(
+        setupBuilder.discardPersistedHostResolvConf(),
+      ).resolves.toBeUndefined();
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining("resolv-host.conf"),
+      );
+    });
+  });
 });
