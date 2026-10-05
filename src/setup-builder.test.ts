@@ -281,7 +281,9 @@ describe("setup_builder", () => {
 
       const cmd = exec.mock.calls.at(-1)?.[0];
       expect(cmd).toMatch(/^sudo sh -c 'rm -f /);
-      expect(cmd).toContain("/var/lib/buildkit/runc-*/executor/resolv-host.conf");
+      expect(cmd).toContain(
+        "/var/lib/buildkit/runc-*/executor/resolv-host.conf",
+      );
       expect(core.warning).not.toHaveBeenCalled();
     });
 
