@@ -7,6 +7,15 @@ updates:
     commit-message:
       prefix: chore
     labels: []
+    ignore:
+      # pnpm/action-setup v5 and v6 ship a pnpm 11 bootstrap that fails to
+      # honor the requested `version:` input and collides with this repo's
+      # `engines.pnpm: 10.33.0` constraint, breaking `pnpm install` with
+      # ERR_PNPM_UNSUPPORTED_ENGINE.
+      # See https://github.com/pnpm/action-setup/issues/225 and #231.
+      # Stay on v4 until upstream fixes are released.
+      - dependency-name: pnpm/action-setup
+        versions: [">=5"]
 
   - package-ecosystem: npm
     directory: /
