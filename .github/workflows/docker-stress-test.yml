@@ -15,7 +15,7 @@ env:
 jobs:
   # Job 1: Basic setup with minimal configuration
   basic-build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -32,7 +32,7 @@ jobs:
 
   # Job 2: Setup with custom buildx configuration
   custom-buildx-config:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -70,7 +70,7 @@ jobs:
 
   # Job 3: Multi-platform build with cache
   multi-platform-cached:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -98,7 +98,7 @@ jobs:
 
   # Job 4: Registry authentication and push
   registry-push:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: github.event.inputs.push_image == 'true'
     steps:
       - name: Checkout
@@ -140,7 +140,7 @@ jobs:
 
   # Job 5: Advanced caching strategies
   advanced-caching:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -170,7 +170,7 @@ jobs:
 
   # Job 6: Build with custom outputs and attestations
   custom-outputs:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -202,10 +202,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04]
+        os: [blacksmith-4vcpu-ubuntu-2404, ubuntu-22.04]
         buildx-version: [latest, v0.11.0]
         include:
-          - os: ubuntu-latest
+          - os: blacksmith-4vcpu-ubuntu-2404
             buildx-version: latest
             driver: docker-container
           - os: ubuntu-22.04
@@ -232,7 +232,7 @@ jobs:
 
   # Job 8: Using buildx action with bake
   bake-build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -274,7 +274,7 @@ jobs:
 
   # Job 9: Complex build with all options
   kitchen-sink:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -367,7 +367,7 @@ jobs:
 
   # Job 10: Setup buildx with append mode
   append-builder:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -394,7 +394,7 @@ jobs:
 
   # Job 11: Build and push with different registries
   multi-registry:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: github.event.inputs.push_image == 'true'
     steps:
       - name: Checkout
@@ -435,7 +435,7 @@ jobs:
 
   # Job 12: Simple build followed by separate build action
   sequential-builds:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v6
