@@ -421,6 +421,17 @@ export async function startBuildkitd(
   }
 }
 
+/**
+ * Parse the host's fstrim budget (GetStickyDiskResponse.fstrim_timeout_secs,
+ * a protobuf int64 that arrives as a bigint) into whole seconds. Anything
+ * unusable is 0, which disables the trim.
+ */
+export function parseFstrimTimeoutSecs(value: unknown): number {
+  const n = typeof value === "bigint" ? Number(value) : Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
 }): Promise<{
@@ -432,6 +443,9 @@ export async function getStickyDisk(options?: {
   // (e.g. branch protection) and its writes to the sticky disk discarded.
   commit_early_deny_reason: string;
   buildkitd_config: BuildkitdConfig;
+  // Host budget, in whole seconds, for trimming the filesystem before unmount
+  // at commit; 0 when the host has not enabled the trim.
+  fstrim_timeout_secs: number;
 }> {
   const cacheKey = core.getInput("cache-key");
   if (cacheKey === "") {
@@ -483,6 +497,9 @@ export async function getStickyDisk(options?: {
     // Absent when the agent or backend predates the field; the default then applies.
     buildkitd_config: buildkitdConfigFromServer(
       response.buildkitdConfig?.gcKeepDurationHours,
+    ),
+    fstrim_timeout_secs: parseFstrimTimeoutSecs(
+      (response as { fstrimTimeoutSecs?: bigint | number }).fstrimTimeoutSecs,
     ),
   };
 }
@@ -674,6 +691,7 @@ export async function setupStickyDisk(): Promise<{
   exposeId: string;
   commitEarlyDenyReason: string;
   buildkitdConfig: BuildkitdConfig;
+  fstrimTimeoutSecs: number;
 }> {
   try {
     const controller = new AbortController();
@@ -690,6 +708,7 @@ export async function setupStickyDisk(): Promise<{
     const cloneName = stickyDiskResponse.clone_name;
 
     const commitEarlyDenyReason = stickyDiskResponse.commit_early_deny_reason;
+    const fstrimTimeoutSecs = stickyDiskResponse.fstrim_timeout_secs;
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
@@ -763,6 +782,7 @@ export async function setupStickyDisk(): Promise<{
       exposeId,
       commitEarlyDenyReason,
       buildkitdConfig: stickyDiskResponse.buildkitd_config,
+      fstrimTimeoutSecs,
     };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
