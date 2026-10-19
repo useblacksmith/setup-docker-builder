@@ -3,6 +3,44 @@ import * as core from "@actions/core";
 import * as fs from "fs";
 import * as setupBuilder from "./setup_builder";
 import { UserInputError } from "./user-input-error";
+import { fromBinary } from "@bufbuild/protobuf";
+import { GetStickyDiskResponseSchema } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+
+describe("fstrimTimeoutSecsFrom", () => {
+  it("prefers the typed field when the proto package knows it", () => {
+    expect(
+      setupBuilder.fstrimTimeoutSecsFrom({ fstrimTimeoutSecs: BigInt(7) }, [
+        { no: 8, wireType: 0, data: new Uint8Array([5]) },
+      ]),
+    ).toBe(7);
+  });
+
+  it("falls back to unknown field 8 from an older proto package", () => {
+    // field 8, varint wire type => tag 0x40; value 5
+    const response = fromBinary(
+      GetStickyDiskResponseSchema,
+      new Uint8Array([0x40, 0x05]),
+    );
+    expect(
+      setupBuilder.fstrimTimeoutSecsFrom(response, response.$unknown ?? []),
+    ).toBe(5);
+    expect(
+      setupBuilder.fstrimTimeoutSecsFrom({}, [
+        { no: 8, wireType: 2, data: new Uint8Array([5]) },
+      ]),
+    ).toBe(0);
+    expect(setupBuilder.fstrimTimeoutSecsFrom({}, [])).toBe(0);
+  });
+
+  it("decodes varints and rejects malformed ones", () => {
+    expect(setupBuilder.decodeVarint(new Uint8Array([0xac, 0x02]))).toBe(300);
+    expect(setupBuilder.decodeVarint(new Uint8Array([0x80]))).toBeNull();
+    expect(setupBuilder.decodeVarint(new Uint8Array([5, 5]))).toBeNull();
+    expect(setupBuilder.parseFstrimTimeoutSecs(BigInt(5))).toBe(5);
+    expect(setupBuilder.parseFstrimTimeoutSecs("2.9")).toBe(2);
+    expect(setupBuilder.parseFstrimTimeoutSecs(-1)).toBe(0);
+  });
+});
 // import * as reporter from "./reporter";
 
 // Mock the modules
