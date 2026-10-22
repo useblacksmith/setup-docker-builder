@@ -640,15 +640,26 @@ void actionsToolkit.run(
       }
     });
 
-    // Print Docker info
-    await core.group(`Docker info`, async () => {
-      try {
-        await Docker.printVersion();
-        await Docker.printInfo();
-      } catch (e) {
-        core.info((e as Error).message);
-      }
-    });
+    const printDockerInfo = () =>
+      core.group(`Docker info`, async () => {
+        try {
+          await Docker.printVersion();
+          await Docker.printInfo();
+        } catch (e) {
+          core.info((e as Error).message);
+        }
+      });
+
+    // The first Docker command waits for the daemon to finish starting, which
+    // takes most of a second on a fresh VM. Start that wait now so it overlaps
+    // buildx setup and the builder start, and print Docker info after them.
+    // BLACKSMITH_DOCKER_WARMUP=false keeps the old order.
+    let dockerWarmup: Promise<unknown> | null = null;
+    if (process.env.BLACKSMITH_DOCKER_WARMUP === "false") {
+      await printDockerInfo();
+    } else {
+      dockerWarmup = execAsync("docker version").catch(() => undefined);
+    }
 
     // Validate and setup buildx version
     let buildxVersion = DEFAULT_BUILDX_VERSION;
@@ -664,26 +675,33 @@ void actionsToolkit.run(
       }
     }
 
-    // Setup buildx
-    await core.group(`Setup buildx`, async () => {
-      await setupBuildx(buildxVersion, toolkit);
-
-      if (!(await toolkit.buildx.isAvailable())) {
-        core.setFailed(
-          `Docker buildx is required. See https://github.com/docker/setup-buildx-action to set up buildx.`,
-        );
-        return;
-      }
-    });
-
-    // Start Blacksmith builder
     let builderInfo: { addr: string | null; exposeId: string } = {
       addr: null,
       exposeId: "",
     };
-    await core.group(`Starting Blacksmith builder`, async () => {
-      builderInfo = await startBlacksmithBuilder(inputs);
-    });
+    try {
+      // Setup buildx
+      await core.group(`Setup buildx`, async () => {
+        await setupBuildx(buildxVersion, toolkit);
+
+        if (!(await toolkit.buildx.isAvailable())) {
+          core.setFailed(
+            `Docker buildx is required. See https://github.com/docker/setup-buildx-action to set up buildx.`,
+          );
+          return;
+        }
+      });
+
+      // Start Blacksmith builder
+      await core.group(`Starting Blacksmith builder`, async () => {
+        builderInfo = await startBlacksmithBuilder(inputs);
+      });
+    } finally {
+      if (dockerWarmup) {
+        await dockerWarmup;
+        await printDockerInfo();
+      }
+    }
 
     if (builderInfo.addr) {
       // Create and configure the builder
