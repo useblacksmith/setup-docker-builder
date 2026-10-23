@@ -338,7 +338,7 @@ export async function startBuildkitd(
     // Wait for buildkitd PID to appear with backoff retry
     const startTime = Date.now();
     const timeout = 10000; // 10 seconds
-    const backoff = 300; // 300ms
+    const backoff = 50; // 50ms
 
     while (Date.now() - startTime < timeout) {
       try {
