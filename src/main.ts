@@ -59,15 +59,18 @@ const execAsync = promisify(exec);
 // pruned layers keep their RBD extents allocated on the backing store until
 // the guest discards them. Bounded by the host-supplied budget; any failure
 // (discard not negotiated, missing binary, timeout) only logs. The result is
-// returned for the lifecycle report.
+// returned for the lifecycle report. A positive minExtentBytes is passed as
+// `fstrim -m`: free extents smaller than that are left alone.
 async function trimFilesystem(
   mountPath: string,
   timeoutSecs: number,
+  minExtentBytes: number,
 ): Promise<FstrimResult> {
   const start = Date.now();
+  const minimum = minExtentBytes > 0 ? ` -m ${minExtentBytes}` : "";
   try {
     const { stdout } = await execAsync(
-      `timeout ${timeoutSecs} sudo fstrim -v -- "${mountPath}"`,
+      `timeout ${timeoutSecs} sudo fstrim -v${minimum} -- "${mountPath}"`,
     );
     const durationMs = Date.now() - start;
     core.info(
@@ -401,6 +404,7 @@ async function startBlacksmithBuilder(
     stateHelper.setCommitEarlyDenyReason(stickyDiskSetup.commitEarlyDenyReason);
     stateHelper.setBuilderMode("blacksmith-remote");
     stateHelper.setFstrimTimeoutSecs(stickyDiskSetup.fstrimTimeoutSecs);
+    stateHelper.setFstrimMinExtentBytes(stickyDiskSetup.fstrimMinExtentBytes);
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
@@ -821,7 +825,11 @@ void actionsToolkit.run(
           ) {
             earlyFailureCheck = await checkPreviousStepFailures();
             if (!earlyFailureCheck.error && !earlyFailureCheck.hasFailures) {
-              const trim = await trimFilesystem(mountPoint, fstrimTimeoutSecs);
+              const trim = await trimFilesystem(
+                mountPoint,
+                fstrimTimeoutSecs,
+                stateHelper.getFstrimMinExtentBytes(),
+              );
               lifecycle.fstrimOutcome = trim.outcome;
               lifecycle.fstrimDurationMs = trim.durationMs;
               lifecycle.fstrimBytes = trim.bytes;

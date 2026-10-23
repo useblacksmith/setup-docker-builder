@@ -474,6 +474,15 @@ export function parseFstrimTimeoutSecs(value: unknown): number {
   return Math.floor(n);
 }
 
+/**
+ * Parse the host's `fstrim --minimum` value
+ * (GetStickyDiskResponse.fstrim_min_extent_bytes, a bigint or saved-state
+ * string) into whole bytes. Anything unusable is 0: the fstrim default.
+ */
+export function parseFstrimMinExtentBytes(value: unknown): number {
+  return parseFstrimTimeoutSecs(value);
+}
+
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
 }): Promise<{
@@ -488,6 +497,8 @@ export async function getStickyDisk(options?: {
   // Host budget, in whole seconds, for trimming the filesystem before unmount
   // at commit; 0 when the host has not enabled the trim.
   fstrim_timeout_secs: number;
+  // Host `fstrim -m` value in bytes; 0 means the fstrim default.
+  fstrim_min_extent_bytes: number;
 }> {
   const cacheKey = core.getInput("cache-key");
   if (cacheKey === "") {
@@ -541,6 +552,9 @@ export async function getStickyDisk(options?: {
       response.buildkitdConfig?.gcKeepDurationHours,
     ),
     fstrim_timeout_secs: parseFstrimTimeoutSecs(response.fstrimTimeoutSecs),
+    fstrim_min_extent_bytes: parseFstrimMinExtentBytes(
+      response.fstrimMinExtentBytes,
+    ),
   };
 }
 
@@ -732,6 +746,7 @@ export async function setupStickyDisk(): Promise<{
   commitEarlyDenyReason: string;
   buildkitdConfig: BuildkitdConfig;
   fstrimTimeoutSecs: number;
+  fstrimMinExtentBytes: number;
 }> {
   try {
     const controller = new AbortController();
@@ -749,6 +764,7 @@ export async function setupStickyDisk(): Promise<{
 
     const commitEarlyDenyReason = stickyDiskResponse.commit_early_deny_reason;
     const fstrimTimeoutSecs = stickyDiskResponse.fstrim_timeout_secs;
+    const fstrimMinExtentBytes = stickyDiskResponse.fstrim_min_extent_bytes;
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
@@ -823,6 +839,7 @@ export async function setupStickyDisk(): Promise<{
       commitEarlyDenyReason,
       buildkitdConfig: stickyDiskResponse.buildkitd_config,
       fstrimTimeoutSecs,
+      fstrimMinExtentBytes,
     };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);

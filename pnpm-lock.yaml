@@ -12,8 +12,8 @@ importers:
         specifier: ^1.10.1
         version: 1.11.1
       '@buf/blacksmith_vm-agent.bufbuild_es':
-        specifier: 2.16.0-20261022235850-0cca692559b2.1
-        version: 2.16.0-20261022235850-0cca692559b2.1(@bufbuild/protobuf@2.16.0)
+        specifier: 2.16.0-20261023032817-36eedc7ae378.1
+        version: 2.16.0-20261023032817-36eedc7ae378.1(@bufbuild/protobuf@2.16.0)
       '@bufbuild/protobuf':
         specifier: ^2.16.0
         version: 2.16.0
@@ -205,8 +205,8 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261022235850-0cca692559b2.1':
-    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.16.0-20261022235850-0cca692559b2.1.tgz}
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261023032817-36eedc7ae378.1':
+    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.16.0-20261023032817-36eedc7ae378.1.tgz}
     peerDependencies:
       '@bufbuild/protobuf': ^2.16.0
 
@@ -2433,7 +2433,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261022235850-0cca692559b2.1(@bufbuild/protobuf@2.16.0)':
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261023032817-36eedc7ae378.1(@bufbuild/protobuf@2.16.0)':
     dependencies:
       '@bufbuild/protobuf': 2.16.0
 

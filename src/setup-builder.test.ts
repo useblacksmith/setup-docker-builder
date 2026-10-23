@@ -27,6 +27,24 @@ describe("parseFstrimTimeoutSecs", () => {
     expect(setupBuilder.parseFstrimTimeoutSecs(-1)).toBe(0);
     expect(setupBuilder.parseFstrimTimeoutSecs(undefined)).toBe(0);
   });
+
+  it("reads fstrim_min_extent_bytes (field 9) as whole bytes, 0 when absent", () => {
+    // field 9, varint wire type => tag 0x48; value 4194304 (4 MiB)
+    const response = fromBinary(
+      GetStickyDiskResponseSchema,
+      new Uint8Array([0x48, 0x80, 0x80, 0x80, 0x02]),
+    );
+    expect(
+      setupBuilder.parseFstrimMinExtentBytes(response.fstrimMinExtentBytes),
+    ).toBe(4194304);
+    expect(
+      setupBuilder.parseFstrimMinExtentBytes(
+        fromBinary(GetStickyDiskResponseSchema, new Uint8Array([]))
+          .fstrimMinExtentBytes,
+      ),
+    ).toBe(0);
+    expect(setupBuilder.parseFstrimMinExtentBytes(-1)).toBe(0);
+  });
 });
 // import * as reporter from "./reporter";
 

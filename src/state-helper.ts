@@ -43,6 +43,15 @@ export function getFstrimTimeoutSecs(): number {
   return Number.isFinite(secs) && secs > 0 ? Math.floor(secs) : 0;
 }
 
+export function setFstrimMinExtentBytes(bytes: number) {
+  core.saveState("fstrimMinExtentBytes", String(bytes));
+}
+
+export function getFstrimMinExtentBytes(): number {
+  const n = Number(core.getState("fstrimMinExtentBytes") || "0");
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 export function setBuildkitdAddr(addr: string) {
   core.saveState("buildkitdAddr", addr);
 }
