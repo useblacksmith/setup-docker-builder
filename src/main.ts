@@ -20,6 +20,9 @@ import {
   logBuildkitdLogTail,
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
+  parseFstrimBytes,
+  fstrimFailureOutcome,
+  type FstrimResult,
 } from "./setup_builder";
 import {
   installBuildKit,
@@ -55,28 +58,32 @@ const execAsync = promisify(exec);
 // Best-effort fstrim of the sticky disk before it is unmounted and committed:
 // pruned layers keep their RBD extents allocated on the backing store until
 // the guest discards them. Bounded by the host-supplied budget; any failure
-// (discard not negotiated, missing binary, timeout) only logs.
+// (discard not negotiated, missing binary, timeout) only logs. The result is
+// returned for the lifecycle report.
 async function trimFilesystem(
   mountPath: string,
   timeoutSecs: number,
-): Promise<void> {
+): Promise<FstrimResult> {
   const start = Date.now();
   try {
     const { stdout } = await execAsync(
       `timeout ${timeoutSecs} sudo fstrim -v -- "${mountPath}"`,
     );
+    const durationMs = Date.now() - start;
     core.info(
-      `fstrim ${mountPath}: ${stdout.trim() || "done"} in ${Date.now() - start}ms`,
+      `fstrim ${mountPath}: ${stdout.trim() || "done"} in ${durationMs}ms`,
     );
+    return { outcome: "ok", durationMs, bytes: parseFstrimBytes(stdout) };
   } catch (error) {
+    const durationMs = Date.now() - start;
     const { code, stderr } = error as { code?: unknown; stderr?: string };
+    const outcome = fstrimFailureOutcome(code, stderr);
     const detail =
-      code === TIMEOUT_EXIT_CODE
+      outcome === "timeout"
         ? `timed out after ${timeoutSecs}s`
         : stderr?.trim() || (error as Error).message;
-    core.info(
-      `fstrim ${mountPath}: failed in ${Date.now() - start}ms: ${detail}`,
-    );
+    core.info(`fstrim ${mountPath}: ${outcome} in ${durationMs}ms: ${detail}`);
+    return { outcome, durationMs, bytes: 0 };
   }
 }
 
@@ -814,7 +821,10 @@ void actionsToolkit.run(
           ) {
             earlyFailureCheck = await checkPreviousStepFailures();
             if (!earlyFailureCheck.error && !earlyFailureCheck.hasFailures) {
-              await trimFilesystem(mountPoint, fstrimTimeoutSecs);
+              const trim = await trimFilesystem(mountPoint, fstrimTimeoutSecs);
+              lifecycle.fstrimOutcome = trim.outcome;
+              lifecycle.fstrimDurationMs = trim.durationMs;
+              lifecycle.fstrimBytes = trim.bytes;
             }
           }
 

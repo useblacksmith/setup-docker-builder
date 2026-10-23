@@ -426,6 +426,48 @@ export async function startBuildkitd(
  * a protobuf int64 that arrives as a bigint) into whole seconds. Anything
  * unusable is 0, which disables the trim.
  */
+/** Outcome of the pre-unmount fstrim, as reported in DockerJobLifecycle. */
+export type FstrimOutcome =
+  | "ok"
+  | "timeout"
+  | "unsupported"
+  | "failed"
+  | "skipped";
+
+export interface FstrimResult {
+  outcome: FstrimOutcome;
+  durationMs: number;
+  bytes: number;
+}
+
+/** Byte count from `fstrim -v` output ("...: 1.2 GiB (1288490188 bytes) trimmed"). */
+export function parseFstrimBytes(stdout: string): number {
+  const m = /\((\d+) bytes\)/.exec(stdout);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * Classifies a failed `timeout <n> sudo fstrim` run: 124 is timeout(1)'s
+ * exit code; discard not negotiated by the hypervisor (EOPNOTSUPP) or no
+ * fstrim binary are "unsupported"; anything else is "failed".
+ */
+export function fstrimFailureOutcome(
+  code: unknown,
+  stderr: string | undefined,
+): FstrimOutcome {
+  if (code === 124) return "timeout";
+  if (code === 127 || code === "ENOENT") return "unsupported";
+  const msg = (stderr ?? "").toLowerCase();
+  if (
+    msg.includes("not supported") ||
+    msg.includes("command not found") ||
+    msg.includes("no such file or directory")
+  ) {
+    return "unsupported";
+  }
+  return "failed";
+}
+
 export function parseFstrimTimeoutSecs(value: unknown): number {
   const n = typeof value === "bigint" ? Number(value) : Number(value ?? 0);
   if (!Number.isFinite(n) || n <= 0) return 0;

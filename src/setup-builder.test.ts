@@ -279,3 +279,31 @@ describe("setup_builder", () => {
     });
   });
 });
+
+describe("fstrim result parsing", () => {
+  it("reads the byte count from fstrim -v", () => {
+    expect(
+      setupBuilder.parseFstrimBytes(
+        "/var/lib/buildkit: 1.2 GiB (1288490188 bytes) trimmed\n",
+      ),
+    ).toBe(1288490188);
+    expect(setupBuilder.parseFstrimBytes("")).toBe(0);
+  });
+
+  it("classifies failures", () => {
+    expect(setupBuilder.fstrimFailureOutcome(124, "")).toBe("timeout");
+    expect(
+      setupBuilder.fstrimFailureOutcome(
+        1,
+        "fstrim: /var/lib/buildkit: the discard operation is not supported",
+      ),
+    ).toBe("unsupported");
+    expect(setupBuilder.fstrimFailureOutcome(127, "")).toBe("unsupported");
+    expect(
+      setupBuilder.fstrimFailureOutcome(
+        1,
+        "fstrim: /x: FITRIM ioctl failed: Input/output error",
+      ),
+    ).toBe("failed");
+  });
+});

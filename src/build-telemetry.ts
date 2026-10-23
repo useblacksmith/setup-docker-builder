@@ -26,6 +26,7 @@ import {
   IntegrityOutcome,
 } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 import * as reporter from "./reporter";
+import type { FstrimOutcome } from "./setup_builder";
 
 // Size caps: telemetry must never balloon teardown. Records over the cap ship
 // without their trace and are marked truncated; the report as a whole is
@@ -94,6 +95,9 @@ export interface JobLifecycle {
   buildkitdSigkillUsed: boolean;
   historyExportTimedOut: boolean;
   historyPruneFailed: boolean;
+  fstrimOutcome: FstrimOutcome;
+  fstrimDurationMs: number;
+  fstrimBytes: number;
   // Runner step-timeline bytes shipped (after the tail cap) and whether the
   // cap cut the head off.
   timelineBytes: number;
@@ -125,6 +129,9 @@ export function newJobLifecycle(): JobLifecycle {
     buildkitdSigkillUsed: false,
     historyExportTimedOut: false,
     historyPruneFailed: false,
+    fstrimOutcome: "skipped",
+    fstrimDurationMs: 0,
+    fstrimBytes: 0,
     timelineBytes: 0,
     timelineTruncated: false,
     historyExportBytes: 0,
