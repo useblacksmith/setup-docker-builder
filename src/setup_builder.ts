@@ -421,6 +421,68 @@ export async function startBuildkitd(
   }
 }
 
+/**
+ * Parse the host's fstrim budget (GetStickyDiskResponse.fstrim_timeout_secs,
+ * a protobuf int64 that arrives as a bigint) into whole seconds. Anything
+ * unusable is 0, which disables the trim.
+ */
+/** Outcome of the pre-unmount fstrim, as reported in DockerJobLifecycle. */
+export type FstrimOutcome =
+  | "ok"
+  | "timeout"
+  | "unsupported"
+  | "failed"
+  | "skipped";
+
+export interface FstrimResult {
+  outcome: FstrimOutcome;
+  durationMs: number;
+  bytes: number;
+}
+
+/** Byte count from `fstrim -v` output ("...: 1.2 GiB (1288490188 bytes) trimmed"). */
+export function parseFstrimBytes(stdout: string): number {
+  const m = /\((\d+) bytes\)/.exec(stdout);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * Classifies a failed `timeout <n> sudo fstrim` run: 124 is timeout(1)'s
+ * exit code; discard not negotiated by the hypervisor (EOPNOTSUPP) or no
+ * fstrim binary are "unsupported"; anything else is "failed".
+ */
+export function fstrimFailureOutcome(
+  code: unknown,
+  stderr: string | undefined,
+): FstrimOutcome {
+  if (code === 124) return "timeout";
+  if (code === 127 || code === "ENOENT") return "unsupported";
+  const msg = (stderr ?? "").toLowerCase();
+  if (
+    msg.includes("not supported") ||
+    msg.includes("command not found") ||
+    msg.includes("no such file or directory")
+  ) {
+    return "unsupported";
+  }
+  return "failed";
+}
+
+export function parseFstrimTimeoutSecs(value: unknown): number {
+  const n = typeof value === "bigint" ? Number(value) : Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/**
+ * Parse the host's `fstrim --minimum` value
+ * (GetStickyDiskResponse.fstrim_min_extent_bytes, a bigint or saved-state
+ * string) into whole bytes. Anything unusable is 0: the fstrim default.
+ */
+export function parseFstrimMinExtentBytes(value: unknown): number {
+  return parseFstrimTimeoutSecs(value);
+}
+
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
 }): Promise<{
@@ -432,6 +494,11 @@ export async function getStickyDisk(options?: {
   // (e.g. branch protection) and its writes to the sticky disk discarded.
   commit_early_deny_reason: string;
   buildkitd_config: BuildkitdConfig;
+  // Host budget, in whole seconds, for trimming the filesystem before unmount
+  // at commit; 0 when the host has not enabled the trim.
+  fstrim_timeout_secs: number;
+  // Host `fstrim -m` value in bytes; 0 means the fstrim default.
+  fstrim_min_extent_bytes: number;
 }> {
   const cacheKey = core.getInput("cache-key");
   if (cacheKey === "") {
@@ -483,6 +550,10 @@ export async function getStickyDisk(options?: {
     // Absent when the agent or backend predates the field; the default then applies.
     buildkitd_config: buildkitdConfigFromServer(
       response.buildkitdConfig?.gcKeepDurationHours,
+    ),
+    fstrim_timeout_secs: parseFstrimTimeoutSecs(response.fstrimTimeoutSecs),
+    fstrim_min_extent_bytes: parseFstrimMinExtentBytes(
+      response.fstrimMinExtentBytes,
     ),
   };
 }
@@ -674,6 +745,8 @@ export async function setupStickyDisk(): Promise<{
   exposeId: string;
   commitEarlyDenyReason: string;
   buildkitdConfig: BuildkitdConfig;
+  fstrimTimeoutSecs: number;
+  fstrimMinExtentBytes: number;
 }> {
   try {
     const controller = new AbortController();
@@ -690,6 +763,8 @@ export async function setupStickyDisk(): Promise<{
     const cloneName = stickyDiskResponse.clone_name;
 
     const commitEarlyDenyReason = stickyDiskResponse.commit_early_deny_reason;
+    const fstrimTimeoutSecs = stickyDiskResponse.fstrim_timeout_secs;
+    const fstrimMinExtentBytes = stickyDiskResponse.fstrim_min_extent_bytes;
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
@@ -763,6 +838,8 @@ export async function setupStickyDisk(): Promise<{
       exposeId,
       commitEarlyDenyReason,
       buildkitdConfig: stickyDiskResponse.buildkitd_config,
+      fstrimTimeoutSecs,
+      fstrimMinExtentBytes,
     };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);

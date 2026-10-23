@@ -3,6 +3,49 @@ import * as core from "@actions/core";
 import * as fs from "fs";
 import * as setupBuilder from "./setup_builder";
 import { UserInputError } from "./user-input-error";
+import { fromBinary } from "@bufbuild/protobuf";
+import { GetStickyDiskResponseSchema } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+
+describe("parseFstrimTimeoutSecs", () => {
+  it("reads the int64 field as whole seconds, 0 when absent or unusable", () => {
+    // field 8, varint wire type => tag 0x40; value 5
+    const response = fromBinary(
+      GetStickyDiskResponseSchema,
+      new Uint8Array([0x40, 0x05]),
+    );
+    expect(
+      setupBuilder.parseFstrimTimeoutSecs(response.fstrimTimeoutSecs),
+    ).toBe(5);
+    expect(
+      setupBuilder.parseFstrimTimeoutSecs(
+        fromBinary(GetStickyDiskResponseSchema, new Uint8Array([]))
+          .fstrimTimeoutSecs,
+      ),
+    ).toBe(0);
+    expect(setupBuilder.parseFstrimTimeoutSecs(BigInt(5))).toBe(5);
+    expect(setupBuilder.parseFstrimTimeoutSecs("2.9")).toBe(2);
+    expect(setupBuilder.parseFstrimTimeoutSecs(-1)).toBe(0);
+    expect(setupBuilder.parseFstrimTimeoutSecs(undefined)).toBe(0);
+  });
+
+  it("reads fstrim_min_extent_bytes (field 9) as whole bytes, 0 when absent", () => {
+    // field 9, varint wire type => tag 0x48; value 4194304 (4 MiB)
+    const response = fromBinary(
+      GetStickyDiskResponseSchema,
+      new Uint8Array([0x48, 0x80, 0x80, 0x80, 0x02]),
+    );
+    expect(
+      setupBuilder.parseFstrimMinExtentBytes(response.fstrimMinExtentBytes),
+    ).toBe(4194304);
+    expect(
+      setupBuilder.parseFstrimMinExtentBytes(
+        fromBinary(GetStickyDiskResponseSchema, new Uint8Array([]))
+          .fstrimMinExtentBytes,
+      ),
+    ).toBe(0);
+    expect(setupBuilder.parseFstrimMinExtentBytes(-1)).toBe(0);
+  });
+});
 // import * as reporter from "./reporter";
 
 // Mock the modules
@@ -252,5 +295,33 @@ describe("setup_builder", () => {
         expect.stringContaining("Error listing build cache contents"),
       );
     });
+  });
+});
+
+describe("fstrim result parsing", () => {
+  it("reads the byte count from fstrim -v", () => {
+    expect(
+      setupBuilder.parseFstrimBytes(
+        "/var/lib/buildkit: 1.2 GiB (1288490188 bytes) trimmed\n",
+      ),
+    ).toBe(1288490188);
+    expect(setupBuilder.parseFstrimBytes("")).toBe(0);
+  });
+
+  it("classifies failures", () => {
+    expect(setupBuilder.fstrimFailureOutcome(124, "")).toBe("timeout");
+    expect(
+      setupBuilder.fstrimFailureOutcome(
+        1,
+        "fstrim: /var/lib/buildkit: the discard operation is not supported",
+      ),
+    ).toBe("unsupported");
+    expect(setupBuilder.fstrimFailureOutcome(127, "")).toBe("unsupported");
+    expect(
+      setupBuilder.fstrimFailureOutcome(
+        1,
+        "fstrim: /x: FITRIM ioctl failed: Input/output error",
+      ),
+    ).toBe("failed");
   });
 });

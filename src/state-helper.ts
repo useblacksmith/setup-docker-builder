@@ -32,6 +32,26 @@ export function getCommitEarlyDenyReason(): string {
   return core.getState("commitEarlyDenyReason");
 }
 
+// Host-supplied budget, in whole seconds, for trimming the sticky disk before
+// unmount at commit; 0 when the host has not enabled the trim.
+export function setFstrimTimeoutSecs(secs: number) {
+  core.saveState("fstrimTimeoutSecs", String(secs));
+}
+
+export function getFstrimTimeoutSecs(): number {
+  const secs = Number(core.getState("fstrimTimeoutSecs") || "0");
+  return Number.isFinite(secs) && secs > 0 ? Math.floor(secs) : 0;
+}
+
+export function setFstrimMinExtentBytes(bytes: number) {
+  core.saveState("fstrimMinExtentBytes", String(bytes));
+}
+
+export function getFstrimMinExtentBytes(): number {
+  const n = Number(core.getState("fstrimMinExtentBytes") || "0");
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 export function setBuildkitdAddr(addr: string) {
   core.saveState("buildkitdAddr", addr);
 }
