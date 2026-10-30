@@ -12,17 +12,17 @@ importers:
         specifier: ^1.10.1
         version: 1.11.1
       '@buf/blacksmith_vm-agent.bufbuild_es':
-        specifier: 2.14.1-20260904184135-ab292bb91e69.3
-        version: 2.14.1-20260904184135-ab292bb91e69.3(@bufbuild/protobuf@2.14.1)
+        specifier: 2.16.0-20261026163753-b7ed8710bf2b.1
+        version: 2.16.0-20261026163753-b7ed8710bf2b.1(@bufbuild/protobuf@2.16.0)
       '@bufbuild/protobuf':
-        specifier: ^2.14.1
-        version: 2.14.1
+        specifier: ^2.16.0
+        version: 2.16.0
       '@connectrpc/connect':
         specifier: ^2.1.1
-        version: 2.1.1(@bufbuild/protobuf@2.14.1)
+        version: 2.1.1(@bufbuild/protobuf@2.16.0)
       '@connectrpc/connect-node':
         specifier: ^2.1.1
-        version: 2.1.1(@bufbuild/protobuf@2.14.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1))
+        version: 2.1.1(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.16.0))
       '@docker/actions-toolkit':
         specifier: 0.37.1
         version: 0.37.1
@@ -43,8 +43,8 @@ importers:
         specifier: ^1.72.0
         version: 1.72.0
       '@bufbuild/protoc-gen-es':
-        specifier: ^2.14.1
-        version: 2.14.1(@bufbuild/protobuf@2.14.1)
+        specifier: ^2.16.0
+        version: 2.16.0(@bufbuild/protobuf@2.16.0)
       '@eslint/js':
         specifier: ^9.29.0
         version: 9.39.4
@@ -205,10 +205,10 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.14.1-20260904184135-ab292bb91e69.3':
-    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.14.1-20260904184135-ab292bb91e69.3.tgz}
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261026163753-b7ed8710bf2b.1':
+    resolution: {tarball: https://buf.build/gen/npm/v1/@buf/blacksmith_vm-agent.bufbuild_es/-/blacksmith_vm-agent.bufbuild_es-2.16.0-20261026163753-b7ed8710bf2b.1.tgz}
     peerDependencies:
-      '@bufbuild/protobuf': ^2.14.1
+      '@bufbuild/protobuf': ^2.16.0
 
   '@bufbuild/buf-darwin-arm64@1.72.0':
     resolution: {integrity: sha512-rKHRvjwAThapxIoOn92vIoTjYSz5FmRemDRLU4BYT4T6QWMEC13PM3/pPnqVgsNKZ5aW7iYDm9ztnisEqSi5yA==}
@@ -260,15 +260,15 @@ packages:
   '@bufbuild/protobuf@2.11.0':
     resolution: {integrity: sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ==}
 
-  '@bufbuild/protobuf@2.14.1':
-    resolution: {integrity: sha512-agRJn3+EJDUe8AvxTx/LnHA/GErvLE62pSaSk7+MwFOtOv8eWBu/qCq2qoZjBjVZ3C2aiFJCveuSs17KMkYGOw==}
+  '@bufbuild/protobuf@2.16.0':
+    resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
 
-  '@bufbuild/protoc-gen-es@2.14.1':
-    resolution: {integrity: sha512-agiGxvA1VAzWPdtOiktK39BNvGgHc1jHBCI1XYQtCQDSpt/5pZ7jTRGKv0fYzExbovDVu+yxJq4Srpv8zCIvUQ==}
+  '@bufbuild/protoc-gen-es@2.16.0':
+    resolution: {integrity: sha512-LbPrEaGd7bOxKbJHllTR5439+PZjqd6fM7xyDZkDVtZ+Efzr7TMdMqShG9Qkf/nYVyiNS/SK5r9JhRaBTFkfZw==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
-      '@bufbuild/protobuf': 2.14.1
+      '@bufbuild/protobuf': 2.16.0
     peerDependenciesMeta:
       '@bufbuild/protobuf':
         optional: true
@@ -276,8 +276,8 @@ packages:
   '@bufbuild/protoplugin@2.11.0':
     resolution: {integrity: sha512-lyZVNFUHArIOt4W0+dwYBe5GBwbKzbOy8ObaloEqsw9Mmiwv2O48TwddDoHN4itylC+BaEGqFdI1W8WQt2vWJQ==}
 
-  '@bufbuild/protoplugin@2.14.1':
-    resolution: {integrity: sha512-oddqHkmUlBSo1TgswPW6hzrP/3nxMIdKUMcB6/NSY/oUkepDV7SealCZlE0ZxhLRIgmvDSuNWOb0HEKfsWPJww==}
+  '@bufbuild/protoplugin@2.16.0':
+    resolution: {integrity: sha512-3FdYJys34VhFnBQsjiV9wurBkX/DBACQAkAk+nCKdO1p8ROVNi7gmaRAcba+4qq8hQq8rYVukuutwvGCvd4kJA==}
 
   '@connectrpc/connect-node@2.1.1':
     resolution: {integrity: sha512-s3TfsI1XF+n+1z6MBS9rTnFsxxR4Rw5wmdEnkQINli81ESGxcsfaEet8duzq8LVuuCupmhUsgpRo0Nv9pZkufg==}
@@ -867,6 +867,11 @@ packages:
 
   '@typescript/vfs@1.6.4':
     resolution: {integrity: sha512-PJFXFS4ZJKiJ9Qiuix6Dz/OwEIqHD7Dme1UwZhTK11vR+5dqW2ACbdndWQexBzCx+CPuMe5WBYQWCsFyGlQLlQ==}
+    peerDependencies:
+      typescript: '*'
+
+  '@typescript/vfs@1.6.5':
+    resolution: {integrity: sha512-gobLHQLmvQGJInFk31NvgMd1uYzRXsd8qgnOssyLD055R2QPnw1ubRbBQ4+T+5qC7IQVuYXdvNDE2G7tMDVHgw==}
     peerDependencies:
       typescript: '*'
 
@@ -2428,9 +2433,9 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@buf/blacksmith_vm-agent.bufbuild_es@2.14.1-20260904184135-ab292bb91e69.3(@bufbuild/protobuf@2.14.1)':
+  '@buf/blacksmith_vm-agent.bufbuild_es@2.16.0-20261026163753-b7ed8710bf2b.1(@bufbuild/protobuf@2.16.0)':
     dependencies:
-      '@bufbuild/protobuf': 2.14.1
+      '@bufbuild/protobuf': 2.16.0
 
   '@bufbuild/buf-darwin-arm64@1.72.0':
     optional: true
@@ -2465,13 +2470,13 @@ snapshots:
 
   '@bufbuild/protobuf@2.11.0': {}
 
-  '@bufbuild/protobuf@2.14.1': {}
+  '@bufbuild/protobuf@2.16.0': {}
 
-  '@bufbuild/protoc-gen-es@2.14.1(@bufbuild/protobuf@2.14.1)':
+  '@bufbuild/protoc-gen-es@2.16.0(@bufbuild/protobuf@2.16.0)':
     dependencies:
-      '@bufbuild/protoplugin': 2.14.1
+      '@bufbuild/protoplugin': 2.16.0
     optionalDependencies:
-      '@bufbuild/protobuf': 2.14.1
+      '@bufbuild/protobuf': 2.16.0
     transitivePeerDependencies:
       - supports-color
 
@@ -2483,22 +2488,22 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bufbuild/protoplugin@2.14.1':
+  '@bufbuild/protoplugin@2.16.0':
     dependencies:
-      '@bufbuild/protobuf': 2.14.1
-      '@typescript/vfs': 1.6.4(typescript@5.4.5)
+      '@bufbuild/protobuf': 2.16.0
+      '@typescript/vfs': 1.6.5(typescript@5.4.5)
       typescript: 5.4.5
     transitivePeerDependencies:
       - supports-color
 
-  '@connectrpc/connect-node@2.1.1(@bufbuild/protobuf@2.14.1)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1))':
+  '@connectrpc/connect-node@2.1.1(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.16.0))':
     dependencies:
-      '@bufbuild/protobuf': 2.14.1
-      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.14.1)
+      '@bufbuild/protobuf': 2.16.0
+      '@connectrpc/connect': 2.1.1(@bufbuild/protobuf@2.16.0)
 
-  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.14.1)':
+  '@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.16.0)':
     dependencies:
-      '@bufbuild/protobuf': 2.14.1
+      '@bufbuild/protobuf': 2.16.0
 
   '@docker/actions-toolkit@0.37.1':
     dependencies:
@@ -2830,7 +2835,7 @@ snapshots:
 
   '@protobuf-ts/plugin@2.11.1':
     dependencies:
-      '@bufbuild/protobuf': 2.14.1
+      '@bufbuild/protobuf': 2.16.0
       '@bufbuild/protoplugin': 2.11.0
       '@protobuf-ts/protoc': 2.11.1
       '@protobuf-ts/runtime': 2.11.1
@@ -3039,6 +3044,13 @@ snapshots:
       eslint-visitor-keys: 5.0.1
 
   '@typescript/vfs@1.6.4(typescript@5.4.5)':
+    dependencies:
+      debug: 4.4.3
+      typescript: 5.4.5
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript/vfs@1.6.5(typescript@5.4.5)':
     dependencies:
       debug: 4.4.3
       typescript: 5.4.5

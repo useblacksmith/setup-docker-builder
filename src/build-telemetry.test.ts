@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { FstrimOutcome } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 import {
   admitBuild,
   capRunnerStepTimeline,
@@ -8,6 +9,7 @@ import {
   MAX_TIMELINE_BYTES,
   MAX_TOTAL_PAYLOAD_BYTES,
   type ExportedBuild,
+  fstrimOutcomeToProto,
 } from "./build-telemetry";
 
 function makeBuild(recordBytes: number, traceBytes: number): ExportedBuild {
@@ -189,5 +191,15 @@ describe("chunkBuilds", () => {
     const chunks = chunkBuilds(builds, 0);
     const refs = chunks.flat().map((b) => b.ref);
     expect(refs).toEqual(builds.map((b) => b.ref));
+  });
+});
+
+describe("fstrimOutcomeToProto", () => {
+  it("maps every outcome string onto the DockerJobLifecycle enum", () => {
+    expect(fstrimOutcomeToProto("ok")).toBe(FstrimOutcome.OK);
+    expect(fstrimOutcomeToProto("timeout")).toBe(FstrimOutcome.TIMEOUT);
+    expect(fstrimOutcomeToProto("unsupported")).toBe(FstrimOutcome.UNSUPPORTED);
+    expect(fstrimOutcomeToProto("failed")).toBe(FstrimOutcome.FAILED);
+    expect(fstrimOutcomeToProto("skipped")).toBe(FstrimOutcome.SKIPPED);
   });
 });
