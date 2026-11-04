@@ -674,6 +674,84 @@ export async function logBuildCacheContents(): Promise<void> {
   }
 }
 
+// Upper bound for the post-step cache prune. Deleting a large backlog of
+// layers can take a while; past this the prune is cancelled (what was already
+// deleted stays deleted) and the post step carries on with the commit.
+export const CACHE_PRUNE_TIMEOUT_SECS = 300;
+
+export interface CachePruneResult {
+  outcome: "ok" | "timeout" | "failed";
+  reclaimedBytes: number;
+  records: number;
+}
+
+// `buildctl prune --format '{{json .}}'` prints one UsageInfo object per
+// deleted record. Sums the sizes; lines that are not JSON are ignored.
+export function parsePruneOutput(stdout: string): {
+  reclaimedBytes: number;
+  records: number;
+} {
+  let reclaimedBytes = 0;
+  let records = 0;
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const record = JSON.parse(trimmed) as { Size?: unknown };
+      records++;
+      if (typeof record.Size === "number" && record.Size > 0) {
+        reclaimedBytes += record.Size;
+      }
+    } catch {
+      // Not a record line.
+    }
+  }
+  return { reclaimedBytes, records };
+}
+
+/**
+ * Prunes the build cache down to maxCacheSizeMB with
+ * `buildctl prune --all --keep-storage`, evicting least recently used records
+ * first. buildkitd runs with pruneInUse = false, so records that are still
+ * referenced are never removed. Never throws: a failed or timed out prune only
+ * warns, since the cache is still consistent and safe to commit.
+ */
+export async function pruneBuildkitCacheToSize(
+  addr: string,
+  maxCacheSizeMB: number,
+  timeoutSecs: number = CACHE_PRUNE_TIMEOUT_SECS,
+): Promise<CachePruneResult> {
+  const cmd =
+    `timeout ${timeoutSecs} sudo buildctl --addr ${addr} prune --all ` +
+    `--keep-storage ${maxCacheSizeMB} --format '{{json .}}'`;
+  core.info(`Pruning BuildKit cache down to ${maxCacheSizeMB} MB`);
+
+  let stdout = "";
+  let outcome: CachePruneResult["outcome"] = "ok";
+  try {
+    ({ stdout } = await execAsync(cmd, { maxBuffer: 64 * 1024 * 1024 }));
+  } catch (error) {
+    const err = error as { code?: number; stdout?: string; message: string };
+    stdout = err.stdout ?? "";
+    if (err.code === 124) {
+      outcome = "timeout";
+      core.warning(
+        `BuildKit cache prune did not finish within ${timeoutSecs}s; continuing with a partially pruned cache`,
+      );
+    } else {
+      outcome = "failed";
+      core.warning(`Error pruning BuildKit cache: ${err.message}`);
+    }
+  }
+
+  const { reclaimedBytes, records } = parsePruneOutput(stdout);
+  const reclaimedGB = (reclaimedBytes / 1e9).toFixed(2);
+  core.info(
+    `BuildKit cache prune reclaimed ${reclaimedBytes} bytes (${reclaimedGB} GB) from ${records} record(s)`,
+  );
+  return { outcome, reclaimedBytes, records };
+}
+
 /**
  * Logs MD5 hashes of specific buildkit database files
  * Uses md5sum with a 5-second timeout to avoid blocking on large files
