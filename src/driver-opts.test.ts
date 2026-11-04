@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
 import * as fs from "fs";
 import { startBuildkitd } from "./setup_builder";
-import { buildkitdConfigFromServer } from "./server-config";
+import {
+  buildkitdConfigFromServer,
+  DEFAULT_BUILDKITD_CONFIG,
+  withMaxCacheSize,
+} from "./server-config";
+import * as TOML from "@iarna/toml";
 import { execa } from "execa";
 
 vi.mock("@actions/core");
@@ -226,5 +231,28 @@ describe("buildkitd.toml GC policy", () => {
     expect(toml).not.toContain("192h");
     expect(toml).toContain("all = true");
     expect(toml).toContain("max-parallelism = 4");
+  });
+
+  it("writes a size-bounded policy after the age-based one when max-cache-size-mb is set", async () => {
+    await startBuildkitd(
+      4,
+      "tcp://127.0.0.1:1234",
+      undefined,
+      undefined,
+      withMaxCacheSize(DEFAULT_BUILDKITD_CONFIG, 51200),
+    );
+
+    const toml = writtenBuildkitdToml();
+    // keepBytes must be a TOML integer: older buildkitd releases decode it
+    // into an int64 and reject floats.
+    expect(toml).toMatch(/keepBytes = 51_?200_?000_?000\n/);
+    const parsed = TOML.parse(toml) as {
+      worker: { oci: { gc: boolean; gcpolicy: TOML.JsonMap[] } };
+    };
+    expect(parsed.worker.oci.gc).toBe(true);
+    expect(parsed.worker.oci.gcpolicy).toEqual([
+      { keepDuration: "192h", all: true },
+      { keepBytes: 51_200_000_000, all: true },
+    ]);
   });
 });

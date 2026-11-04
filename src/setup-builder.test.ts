@@ -325,3 +325,115 @@ describe("fstrim result parsing", () => {
     ).toBe("failed");
   });
 });
+
+describe("BuildKit cache prune", () => {
+  type ExecCallback = (err: unknown, result?: unknown) => void;
+
+  async function mockExec(
+    impl: (cmd: string, cb: ExecCallback) => void,
+  ): Promise<ReturnType<typeof vi.fn>> {
+    const exec = vi.mocked((await import("child_process")).exec);
+    exec.mockImplementation(((
+      cmd: string,
+      optsOrCb: unknown,
+      maybeCb?: ExecCallback,
+    ) => {
+      const cb = (typeof optsOrCb === "function" ? optsOrCb : maybeCb)!;
+      impl(cmd, cb as ExecCallback);
+    }) as unknown as typeof exec);
+    return exec as unknown as ReturnType<typeof vi.fn>;
+  }
+
+  const record = (id: string, size: number) =>
+    JSON.stringify({ ID: id, Mutable: false, InUse: false, Size: size });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sums the sizes of the pruned records", () => {
+    expect(
+      setupBuilder.parsePruneOutput(
+        [record("a", 1_500_000_000), record("b", 250), "", "not json"].join(
+          "\n",
+        ),
+      ),
+    ).toEqual({ reclaimedBytes: 1_500_000_250, records: 2 });
+    expect(setupBuilder.parsePruneOutput("")).toEqual({
+      reclaimedBytes: 0,
+      records: 0,
+    });
+  });
+
+  it("prunes down to the limit with a bounded buildctl call", async () => {
+    const exec = await mockExec((cmd, cb) =>
+      cb(null, { stdout: record("a", 3_000_000_000) + "\n", stderr: "" }),
+    );
+
+    const result = await setupBuilder.pruneBuildkitCacheToSize(
+      "tcp://127.0.0.1:1234",
+      51200,
+      120,
+    );
+
+    expect(result).toEqual({
+      outcome: "ok",
+      reclaimedBytes: 3_000_000_000,
+      records: 1,
+    });
+    const cmd = exec.mock.calls[0][0] as string;
+    expect(cmd).toBe(
+      "timeout 120 sudo buildctl --addr tcp://127.0.0.1:1234 prune --all --keep-storage 51200 --format '{{json .}}'",
+    );
+    // A long prune can print one line per record; the default 1 MiB exec
+    // buffer would turn a successful prune into an error.
+    expect(exec.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ maxBuffer: 64 * 1024 * 1024 }),
+    );
+  });
+
+  it("counts what was pruned before a timeout and does not throw", async () => {
+    await mockExec((cmd, cb) =>
+      cb(
+        Object.assign(new Error("Command failed"), {
+          code: 124,
+          stdout: record("a", 700) + "\n" + record("b", 300) + "\n",
+        }),
+      ),
+    );
+
+    const result = await setupBuilder.pruneBuildkitCacheToSize(
+      "tcp://127.0.0.1:1234",
+      1024,
+    );
+
+    expect(result).toEqual({
+      outcome: "timeout",
+      reclaimedBytes: 1000,
+      records: 2,
+    });
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining("did not finish within 300s"),
+    );
+  });
+
+  it("warns instead of throwing when buildctl fails", async () => {
+    await mockExec((cmd, cb) =>
+      cb(Object.assign(new Error("connection refused"), { code: 1 })),
+    );
+
+    const result = await setupBuilder.pruneBuildkitCacheToSize(
+      "tcp://127.0.0.1:1234",
+      1024,
+    );
+
+    expect(result).toEqual({
+      outcome: "failed",
+      reclaimedBytes: 0,
+      records: 0,
+    });
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining("Error pruning BuildKit cache"),
+    );
+  });
+});

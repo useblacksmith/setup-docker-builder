@@ -52,6 +52,17 @@ export function getFstrimMinExtentBytes(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+// User-supplied max-cache-size-mb (MB) for the post-step prune; null when
+// unset or when this job did not start buildkitd on the sticky disk.
+export function setMaxCacheSizeMB(mb: number | null) {
+  core.saveState("maxCacheSizeMB", mb === null ? "" : String(mb));
+}
+
+export function getMaxCacheSizeMB(): number | null {
+  const mb = Number(core.getState("maxCacheSizeMB") || "0");
+  return Number.isSafeInteger(mb) && mb > 0 ? mb : null;
+}
+
 export function setBuildkitdAddr(addr: string) {
   core.saveState("buildkitdAddr", addr);
 }

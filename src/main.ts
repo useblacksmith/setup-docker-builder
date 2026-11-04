@@ -19,6 +19,7 @@ import {
   logBuildCacheContents,
   logBuildkitdLogTail,
   logDatabaseHashes,
+  pruneBuildkitCacheToSize,
   writeDockerContainerBuildkitdTomlFile,
   parseFstrimBytes,
   fstrimFailureOutcome,
@@ -41,7 +42,12 @@ import {
 } from "./build-telemetry";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
-import { runPreCommitHooks, type PrepareCommitResponse } from "./server-config";
+import {
+  parseMaxCacheSizeMB,
+  runPreCommitHooks,
+  withMaxCacheSize,
+  type PrepareCommitResponse,
+} from "./server-config";
 import {
   Metric_MetricType,
   BuilderMode,
@@ -205,6 +211,7 @@ export interface Inputs {
   "github-token": string;
   "driver-opts": string[];
   "max-parallelism": number | null;
+  "max-cache-size-mb": number | null;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -232,6 +239,9 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
+    "max-cache-size-mb": parseMaxCacheSizeMB(
+      core.getInput("max-cache-size-mb"),
+    ),
   };
 }
 
@@ -387,7 +397,10 @@ async function startBlacksmithBuilder(
         parallelism,
         buildkitdPath,
         inputs["driver-opts"],
-        stickyDiskSetup.buildkitdConfig,
+        withMaxCacheSize(
+          stickyDiskSetup.buildkitdConfig,
+          inputs["max-cache-size-mb"],
+        ),
       );
     } finally {
       const buildkitdDurationMs = Date.now() - buildkitdStartTime;
@@ -405,6 +418,7 @@ async function startBlacksmithBuilder(
     stateHelper.setBuilderMode("blacksmith-remote");
     stateHelper.setFstrimTimeoutSecs(stickyDiskSetup.fstrimTimeoutSecs);
     stateHelper.setFstrimMinExtentBytes(stickyDiskSetup.fstrimMinExtentBytes);
+    stateHelper.setMaxCacheSizeMB(inputs["max-cache-size-mb"]);
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
@@ -422,6 +436,35 @@ async function startBlacksmithBuilder(
     );
     return { addr: null, exposeId: "" };
   }
+}
+
+/**
+ * Prunes the build cache to the user's max-cache-size-mb before the sticky
+ * disk is committed. Skipped when no limit is set or when this job's changes
+ * will not be committed anyway.
+ */
+async function maybePruneBuildCache(
+  buildkitdAddr: string,
+  lifecycle: JobLifecycle,
+): Promise<void> {
+  const maxCacheSizeMB = stateHelper.getMaxCacheSizeMB();
+  if (maxCacheSizeMB === null) {
+    return;
+  }
+  if (!stateHelper.getExposeId() || stateHelper.getCommitEarlyDenyReason()) {
+    core.info(
+      "Skipping BuildKit cache prune: the sticky disk will not be committed for this job",
+    );
+    return;
+  }
+
+  const result = await pruneBuildkitCacheToSize(buildkitdAddr, maxCacheSizeMB);
+  lifecycle.pruneTriggered = true;
+  lifecycle.pruneBytes = result.reclaimedBytes;
+  await reporter.reportMetric(
+    Metric_MetricType.BPA_V2_PRUNE_BYTES,
+    result.reclaimedBytes,
+  );
 }
 
 /**
@@ -491,6 +534,12 @@ async function maybeShutdownBuildkitd(
     builds.map((b) => b.ref),
     lifecycle,
   );
+
+  // Enforce max-cache-size-mb on what gets committed. buildkitd's size-bounded
+  // GC policy may not have run since the last build finished (it is throttled
+  // to once a minute), so prune explicitly, after this job's history records
+  // have been exported and deleted.
+  await maybePruneBuildCache(buildkitdAddr, lifecycle);
 
   const buildkitdShutdownStartTime = Date.now();
   const wasRunning = await shutdownBuildkitd();

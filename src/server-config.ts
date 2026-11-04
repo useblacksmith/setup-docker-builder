@@ -99,6 +99,64 @@ export function buildkitdConfigFromServer(
   };
 }
 
+// `max-cache-size-mb` uses the same decimal megabytes as
+// `buildctl prune --keep-storage` and the v1 input: 1 MB = 1,000,000 bytes.
+export const BYTES_PER_MB = 1_000_000;
+
+/**
+ * Parses the `max-cache-size-mb` input. Returns the limit in MB, or null when
+ * the input is empty or invalid (invalid values only warn, so a typo never
+ * fails the build). Zero is rejected: buildkit treats a zero byte limit as
+ * "no limit" in gcpolicy but as "delete everything" in `prune --keep-storage`.
+ */
+export function parseMaxCacheSizeMB(input: string): number | null {
+  const value = input.trim();
+  if (value === "") {
+    return null;
+  }
+
+  const mb = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(mb * BYTES_PER_MB) || mb <= 0) {
+    core.warning(
+      `Invalid max-cache-size-mb value '${input}', ignoring. Must be a positive integer number of MB (e.g. 51200 for 50 GB).`,
+    );
+    return null;
+  }
+
+  return mb;
+}
+
+/**
+ * Adds a size-bounded GC policy to a buildkitd config. The existing policies
+ * (the age-based keepDuration, possibly set by the backend) still run first;
+ * the extra `all = true, keepBytes = N` policy then evicts least recently used
+ * cache records until the cache fits in N bytes. buildkitd runs GC shortly
+ * after it starts and after builds, so an oversized cache restored from the
+ * sticky disk is trimmed at the start of the job as well. The `gc` flag is
+ * left as is; the post step's prune enforces the limit either way.
+ *
+ * `keepBytes` is used rather than the newer `maxUsedSpace` because every
+ * buildkit release accepts it; on buildkit >= v0.17 it maps to
+ * `reservedSpace`, which caps usage the same way when no other space limit
+ * is set on the policy.
+ */
+export function withMaxCacheSize(
+  config: BuildkitdConfig,
+  maxCacheSizeMB: number | null,
+): BuildkitdConfig {
+  if (maxCacheSizeMB === null) {
+    return config;
+  }
+
+  return {
+    ...config,
+    gcPolicy: [
+      ...(config.gcPolicy ?? []),
+      { all: true, keepBytes: maxCacheSizeMB * BYTES_PER_MB },
+    ],
+  };
+}
+
 /**
  * Runs an ordered list of pre-commit hooks. Returns whether the commit
  * should proceed based on hook results and their failure modes.

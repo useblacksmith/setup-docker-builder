@@ -3,6 +3,8 @@ import * as core from "@actions/core";
 import {
   buildkitdConfigFromServer,
   DEFAULT_BUILDKITD_CONFIG,
+  parseMaxCacheSizeMB,
+  withMaxCacheSize,
 } from "./server-config";
 
 vi.mock("@actions/core", () => ({
@@ -48,4 +50,66 @@ describe("buildkitdConfigFromServer", () => {
       );
     },
   );
+});
+
+describe("parseMaxCacheSizeMB", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null without warning when the input is not set", () => {
+    expect(parseMaxCacheSizeMB("")).toBeNull();
+    expect(parseMaxCacheSizeMB("   ")).toBeNull();
+    expect(core.warning).not.toHaveBeenCalled();
+  });
+
+  it("parses a positive integer number of MB", () => {
+    expect(parseMaxCacheSizeMB("51200")).toBe(51200);
+    expect(parseMaxCacheSizeMB(" 409600 ")).toBe(409600);
+    expect(parseMaxCacheSizeMB("1")).toBe(1);
+  });
+
+  it.each(["0", "-1", "1.5", "50GB", "1e5", "abc", "99999999999"])(
+    "warns and ignores invalid value %s",
+    (value) => {
+      expect(parseMaxCacheSizeMB(value)).toBeNull();
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid max-cache-size-mb value"),
+      );
+    },
+  );
+});
+
+describe("withMaxCacheSize", () => {
+  it("returns the config unchanged when no limit is set", () => {
+    expect(withMaxCacheSize(DEFAULT_BUILDKITD_CONFIG, null)).toBe(
+      DEFAULT_BUILDKITD_CONFIG,
+    );
+  });
+
+  it("appends a size-bounded policy after the age-based default", () => {
+    const config = withMaxCacheSize(DEFAULT_BUILDKITD_CONFIG, 51200);
+
+    expect(config.gc).toBe(true);
+    expect(config.gcPolicy).toEqual([
+      { keepDuration: "192h", all: true },
+      { all: true, keepBytes: 51_200_000_000 },
+    ]);
+    // The shared default is not mutated.
+    expect(DEFAULT_BUILDKITD_CONFIG.gcPolicy).toEqual([
+      { keepDuration: "192h", all: true },
+    ]);
+  });
+
+  it("keeps the backend keepDuration and gc flag", () => {
+    const config = withMaxCacheSize(buildkitdConfigFromServer(72n), 1024);
+    expect(config.gcPolicy).toEqual([
+      { keepDuration: "72h", all: true },
+      { all: true, keepBytes: 1_024_000_000 },
+    ]);
+
+    const gcOff = withMaxCacheSize({ gc: false, gcPolicy: [] }, 1024);
+    expect(gcOff.gc).toBe(false);
+    expect(gcOff.gcPolicy).toEqual([{ all: true, keepBytes: 1_024_000_000 }]);
+  });
 });

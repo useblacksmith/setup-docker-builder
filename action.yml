@@ -39,6 +39,13 @@ inputs:
   max-parallelism:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
+  max-cache-size-mb:
+    description: >-
+      Maximum size of the Docker layer cache for this cache-key, in MB
+      (e.g., 51200 for 50 GB). Least recently used layers beyond the limit are
+      garbage collected during the job and pruned before the cache is saved.
+      If not set, only the age-based garbage collection applies.
+    required: false
 runs:
   using: node24
   main: dist/index.js
