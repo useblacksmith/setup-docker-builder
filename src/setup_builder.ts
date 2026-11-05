@@ -391,7 +391,7 @@ export async function startBuildkitd(
 export type FstrimFailureOutcome = "timeout" | "unsupported" | "failed";
 
 /**
- * Classifies a failed `timeout <n> sudo fstrim` run: 124 is timeout(1)'s
+ * Classifies a failed `sudo timeout <n> fstrim` run: 124 is timeout(1)'s
  * exit code; discard not negotiated by the hypervisor (EOPNOTSUPP) or no
  * fstrim binary are "unsupported"; anything else is "failed".
  */
