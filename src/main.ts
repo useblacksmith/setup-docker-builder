@@ -27,6 +27,7 @@ import {
   logBuildkitdLogTail,
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
+  fstrimFailureOutcome,
 } from "./setup_builder";
 import {
   installBuildKit,
@@ -40,6 +41,38 @@ import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydi
 const DEFAULT_BUILDX_VERSION = "v0.23.0";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
+
+// Best-effort fstrim of the sticky disk before it is unmounted and committed:
+// pruned layers keep their RBD extents allocated on the backing store until
+// the guest discards them. Bounded by the host-supplied budget; any failure
+// (discard not negotiated, missing binary, timeout) only logs. A positive
+// minExtentBytes is passed as `fstrim -m`: free extents smaller than that are
+// left alone.
+async function trimFilesystem(
+  mountPath: string,
+  timeoutSecs: number,
+  minExtentBytes: number,
+): Promise<void> {
+  const start = Date.now();
+  const minimum = minExtentBytes > 0 ? ` -m ${minExtentBytes}` : "";
+  try {
+    const { stdout } = await execAsync(
+      `timeout ${timeoutSecs} sudo fstrim -v${minimum} -- "${mountPath}"`,
+    );
+    core.info(
+      `fstrim ${mountPath}: ${stdout.trim() || "done"} in ${Date.now() - start}ms`,
+    );
+  } catch (error) {
+    const durationMs = Date.now() - start;
+    const { code, stderr } = error as { code?: unknown; stderr?: string };
+    const outcome = fstrimFailureOutcome(code, stderr);
+    const detail =
+      outcome === "timeout"
+        ? `timed out after ${timeoutSecs}s`
+        : stderr?.trim() || (error as Error).message;
+    core.info(`fstrim ${mountPath}: ${outcome} in ${durationMs}ms: ${detail}`);
+  }
+}
 
 async function getDeviceFromMount(mountPath: string): Promise<string | null> {
   try {
@@ -514,6 +547,8 @@ async function startBlacksmithBuilder(
     // Save state for post action
     stateHelper.setExposeId(stickyDiskSetup.exposeId);
     stateHelper.setCommitEarlyDenyReason(stickyDiskSetup.commitEarlyDenyReason);
+    stateHelper.setFstrimTimeoutSecs(stickyDiskSetup.fstrimTimeoutSecs);
+    stateHelper.setFstrimMinExtentBytes(stickyDiskSetup.fstrimMinExtentBytes);
 
     return { addr: buildkitdAddr, exposeId: stickyDiskSetup.exposeId };
   } catch (error) {
@@ -795,6 +830,9 @@ void actionsToolkit.run(
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
       let integrityCheckPassed: boolean | null = null;
+      let earlyFailureCheck: Awaited<
+        ReturnType<typeof checkPreviousStepFailures>
+      > | null = null;
 
       try {
         // Step 1: Shut down buildkitd if this instance started it.
@@ -826,6 +864,28 @@ void actionsToolkit.run(
 
           // Log database file hashes after integrity check
           await logDatabaseHashes("after integrity check");
+
+          // Discard freed blocks before unmount so the committed snapshot
+          // does not keep them allocated. Only when the host enabled the
+          // trim and this run is still on track to commit; the previous-step
+          // check is done once here and reused by the commit decision below.
+          const fstrimTimeoutSecs = stateHelper.getFstrimTimeoutSecs();
+          if (
+            fstrimTimeoutSecs > 0 &&
+            exposeId &&
+            integrityCheckPassed &&
+            !stateHelper.getCommitEarlyDenyReason() &&
+            !stateHelper.getSigkillUsed()
+          ) {
+            earlyFailureCheck = await checkPreviousStepFailures();
+            if (!earlyFailureCheck.error && !earlyFailureCheck.hasFailures) {
+              await trimFilesystem(
+                mountPoint,
+                fstrimTimeoutSecs,
+                stateHelper.getFstrimMinExtentBytes(),
+              );
+            }
+          }
 
           // Get filesystem usage BEFORE unmounting (critical timing)
           try {
@@ -928,7 +988,8 @@ void actionsToolkit.run(
           core.info(
             "Checking for previous step failures before committing sticky disk",
           );
-          const failureCheck = await checkPreviousStepFailures();
+          const failureCheck =
+            earlyFailureCheck ?? (await checkPreviousStepFailures());
 
           if (failureCheck.error) {
             core.warning(
