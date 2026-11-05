@@ -45,7 +45,8 @@ const execAsync = promisify(exec);
 // Best-effort fstrim of the sticky disk before it is unmounted and committed:
 // pruned layers keep their RBD extents allocated on the backing store until
 // the guest discards them. Bounded by the host-supplied budget; any failure
-// (discard not negotiated, missing binary, timeout) only logs. A positive
+// (discard not negotiated, missing binary, timeout) only logs. `timeout` runs
+// under sudo so it has the privilege to stop root's fstrim. A positive
 // minExtentBytes is passed as `fstrim -m`: free extents smaller than that are
 // left alone.
 async function trimFilesystem(
@@ -57,7 +58,7 @@ async function trimFilesystem(
   const minimum = minExtentBytes > 0 ? ` -m ${minExtentBytes}` : "";
   try {
     const { stdout } = await execAsync(
-      `timeout ${timeoutSecs} sudo fstrim -v${minimum} -- "${mountPath}"`,
+      `sudo timeout ${timeoutSecs} fstrim -v${minimum} -- "${mountPath}"`,
     );
     core.info(
       `fstrim ${mountPath}: ${stdout.trim() || "done"} in ${Date.now() - start}ms`,
