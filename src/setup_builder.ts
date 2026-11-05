@@ -387,6 +387,51 @@ export async function startBuildkitd(
   }
 }
 
+/** Why the best-effort pre-unmount fstrim did not complete, as logged by the post step. */
+export type FstrimFailureOutcome = "timeout" | "unsupported" | "failed";
+
+/**
+ * Classifies a failed `timeout <n> sudo fstrim` run: 124 is timeout(1)'s
+ * exit code; discard not negotiated by the hypervisor (EOPNOTSUPP) or no
+ * fstrim binary are "unsupported"; anything else is "failed".
+ */
+export function fstrimFailureOutcome(
+  code: unknown,
+  stderr: string | undefined,
+): FstrimFailureOutcome {
+  if (code === 124) return "timeout";
+  if (code === 127 || code === "ENOENT") return "unsupported";
+  const msg = (stderr ?? "").toLowerCase();
+  if (
+    msg.includes("not supported") ||
+    msg.includes("command not found") ||
+    msg.includes("no such file or directory")
+  ) {
+    return "unsupported";
+  }
+  return "failed";
+}
+
+/**
+ * Parse the host's fstrim budget (GetStickyDiskResponse.fstrim_timeout_secs,
+ * a protobuf int64 that arrives as a bigint) into whole seconds. Anything
+ * unusable is 0, which disables the trim.
+ */
+export function parseFstrimTimeoutSecs(value: unknown): number {
+  const n = typeof value === "bigint" ? Number(value) : Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/**
+ * Parse the host's `fstrim --minimum` value
+ * (GetStickyDiskResponse.fstrim_min_extent_bytes, a bigint or saved-state
+ * string) into whole bytes. Anything unusable is 0: the fstrim default.
+ */
+export function parseFstrimMinExtentBytes(value: unknown): number {
+  return parseFstrimTimeoutSecs(value);
+}
+
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
 }): Promise<{
@@ -397,6 +442,11 @@ export async function getStickyDisk(options?: {
   // Non-empty when the host already knows this job's commit will be denied
   // (e.g. branch protection) and its writes to the sticky disk discarded.
   commit_early_deny_reason: string;
+  // Host budget, in whole seconds, for trimming the filesystem before unmount
+  // at commit; 0 when the host has not enabled the trim.
+  fstrim_timeout_secs: number;
+  // Host `fstrim -m` value in bytes; 0 means the fstrim default.
+  fstrim_min_extent_bytes: number;
 }> {
   const client = await reporter.createBlacksmithAgentClient();
   core.info(`Created Blacksmith agent client`);
@@ -438,6 +488,10 @@ export async function getStickyDisk(options?: {
     commit_early_deny_reason: response.commitEarlyDeny
       ? response.commitEarlyDenyReason || "denied by host policy"
       : "",
+    fstrim_timeout_secs: parseFstrimTimeoutSecs(response.fstrimTimeoutSecs),
+    fstrim_min_extent_bytes: parseFstrimMinExtentBytes(
+      response.fstrimMinExtentBytes,
+    ),
   };
 }
 
@@ -675,6 +729,8 @@ export async function setupStickyDisk(): Promise<{
   device: string;
   exposeId: string;
   commitEarlyDenyReason: string;
+  fstrimTimeoutSecs: number;
+  fstrimMinExtentBytes: number;
 }> {
   try {
     const controller = new AbortController();
@@ -691,6 +747,8 @@ export async function setupStickyDisk(): Promise<{
     const cloneName = stickyDiskResponse.clone_name;
 
     const commitEarlyDenyReason = stickyDiskResponse.commit_early_deny_reason;
+    const fstrimTimeoutSecs = stickyDiskResponse.fstrim_timeout_secs;
+    const fstrimMinExtentBytes = stickyDiskResponse.fstrim_min_extent_bytes;
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
@@ -761,7 +819,13 @@ export async function setupStickyDisk(): Promise<{
     // Log database file hashes after mount
     await logDatabaseHashes("after mount");
 
-    return { device, exposeId, commitEarlyDenyReason };
+    return {
+      device,
+      exposeId,
+      commitEarlyDenyReason,
+      fstrimTimeoutSecs,
+      fstrimMinExtentBytes,
+    };
   } catch (error) {
     core.warning(`Error in setupStickyDisk: ${(error as Error).message}`);
     await reporter.reportBuildPushActionFailure(
