@@ -162,12 +162,13 @@ async function getRoutableHostDns(): Promise<string[]> {
   return publicDnsFallback;
 }
 
+// The mirror is the only plain-HTTP endpoint, so only its own entry carries
+// `http`/`insecure`. Setting them on `docker.io` makes buildx send Docker Hub
+// requests over HTTP; the redirect to HTTPS turns a manifest PUT into a GET.
 function getDockerMirrorRegistryConfig(): TOML.JsonMap {
   return {
     "docker.io": {
       mirrors: ["http://192.168.127.1:5000"],
-      http: true,
-      insecure: true,
     },
     "192.168.127.1:5000": {
       http: true,
