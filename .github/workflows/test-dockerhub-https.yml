@@ -1,0 +1,103 @@
+name: Test Docker Hub HTTPS
+
+# Checks that buildx and buildkitd reach Docker Hub over verified HTTPS while
+# the Blacksmith mirror stays on HTTP. .github/scripts/dockerhub-standin.sh
+# answers as registry-1.docker.io on the runner.
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, release/v2]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: docker.io/standin/setup-docker-builder-test
+
+jobs:
+  fallback-builder:
+    name: Fallback builder pushes a manifest list over HTTPS
+    runs-on: blacksmith
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Assert BLACKSMITH_AGENT_ADDR is advertised
+        run: test -n "$BLACKSMITH_AGENT_ADDR"
+
+      # No cache-key: the action warns and falls back to a local builder.
+      - name: Setup Docker Builder without cache-key
+        uses: ./
+
+      - name: Assert the fallback builder is in use
+        run: |
+          docker buildx inspect --bootstrap | tee /tmp/builder.txt
+          grep -Eq '^Driver:\s+docker-container$' /tmp/builder.txt
+
+      - name: Start the Docker Hub stand-in
+        run: .github/scripts/dockerhub-standin.sh start
+
+      - name: Push a manifest list with imagetools create
+        run: |
+          docker buildx imagetools create -t "$IMAGE:manifest" registry.k8s.io/pause:3.10
+          docker buildx imagetools inspect "$IMAGE:manifest"
+
+      - name: Assert nothing went to Docker Hub over plain HTTP
+        run: |
+          .github/scripts/dockerhub-standin.sh http-log
+          test ! -s /tmp/dockerhub-standin/http-requests.log
+
+  blacksmith-builder:
+    name: Blacksmith builder verifies Docker Hub TLS
+    runs-on: blacksmith
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Assert BLACKSMITH_AGENT_ADDR is advertised
+        run: test -n "$BLACKSMITH_AGENT_ADDR"
+
+      # Before buildkitd starts, so it loads the stand-in's CA.
+      - name: Start the Docker Hub stand-in
+        run: .github/scripts/dockerhub-standin.sh start
+
+      - name: Setup Docker Builder
+        uses: ./
+        with:
+          cache-key: test/setup-docker-builder-dockerhub-https
+          nofallback: "true"
+
+      - name: Assert the Blacksmith builder is in use
+        run: |
+          docker buildx inspect | tee /tmp/builder.txt
+          grep -Eq '^Driver:\s+remote$' /tmp/builder.txt
+
+      - name: Write a Dockerfile that pulls nothing
+        run: |
+          mkdir -p /tmp/ctx
+          date >/tmp/ctx/stamp
+          printf 'FROM scratch\nCOPY stamp /stamp\n' >/tmp/ctx/Dockerfile
+
+      - name: Push over HTTPS with a trusted certificate
+        run: docker buildx build --push -t "$IMAGE:trusted" /tmp/ctx
+
+      - name: Assert nothing went to Docker Hub over plain HTTP
+        run: |
+          .github/scripts/dockerhub-standin.sh http-log
+          test ! -s /tmp/dockerhub-standin/http-requests.log
+
+      - name: Serve a certificate no CA on the runner trusts
+        run: .github/scripts/dockerhub-standin.sh untrusted
+
+      - name: Assert the push fails on certificate verification
+        run: |
+          if docker buildx build --push -t "$IMAGE:untrusted" /tmp/ctx >/tmp/push.log 2>&1; then
+            cat /tmp/push.log
+            echo "::error::push succeeded against an untrusted certificate"
+            exit 1
+          fi
+          cat /tmp/push.log
+          grep -q 'x509' /tmp/push.log
+          test ! -s /tmp/dockerhub-standin/http-requests.log
