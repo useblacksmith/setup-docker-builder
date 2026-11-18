@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as core from "@actions/core";
 import * as fs from "fs";
+import * as TOML from "@iarna/toml";
 import * as setupBuilder from "./setup_builder";
 import { fromBinary } from "@bufbuild/protobuf";
 import { GetStickyDiskResponseSchema } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
@@ -141,6 +142,16 @@ describe("setup_builder", () => {
       expect(config).toContain('mirrors = [ "http://192.168.127.1:5000" ]');
       expect(config).toContain('[registry."docker.io"]');
       expect(config).toContain('[registry."192.168.127.1:5000"]');
+      const parsed = TOML.parse(config) as {
+        registry: Record<string, Record<string, unknown>>;
+      };
+      expect(parsed.registry["docker.io"]).toEqual({
+        mirrors: ["http://192.168.127.1:5000"],
+      });
+      expect(parsed.registry["192.168.127.1:5000"]).toEqual({
+        http: true,
+        insecure: true,
+      });
       expect(config).not.toContain("[grpc]");
       expect(core.info).toHaveBeenCalledWith(
         "Wrote Docker container BuildKit config to local-buildkitd.toml",
