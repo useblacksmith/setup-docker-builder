@@ -4,7 +4,11 @@ import * as fs from "fs";
 import * as TOML from "@iarna/toml";
 import * as setupBuilder from "./setup_builder";
 import { fromBinary } from "@bufbuild/protobuf";
-import { GetStickyDiskResponseSchema } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+import {
+  CommitIntent,
+  GetStickyDiskResponseSchema,
+} from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+import * as reporter from "./reporter";
 
 describe("parseFstrimTimeoutSecs", () => {
   it("reads the int64 field as whole seconds, 0 when absent or unusable", () => {
@@ -46,6 +50,31 @@ describe("parseFstrimTimeoutSecs", () => {
     expect(setupBuilder.parseFstrimMinExtentBytes(-1)).toBe(0);
   });
 });
+describe("isStickyDiskBuilder", () => {
+  it("accepts only the remote builder pointed at this action's buildkitd", () => {
+    const endpoint = setupBuilder.BUILDKIT_DAEMON_ADDR;
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "remote",
+        nodes: [{ endpoint }],
+      }),
+    ).toBe(true);
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "docker-container",
+        nodes: [{ endpoint: "unix:///var/run/docker.sock" }],
+      }),
+    ).toBe(false);
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "remote",
+        nodes: [{ endpoint: "tcp://10.0.0.2:1234" }],
+      }),
+    ).toBe(false);
+    expect(setupBuilder.isStickyDiskBuilder(undefined)).toBe(false);
+  });
+});
+
 // import * as reporter from "./reporter";
 
 // Mock the modules
@@ -128,6 +157,24 @@ describe("setup_builder", () => {
   });
 
   // Tailscale tests removed - not needed for setup-docker-builder
+
+  describe("getStickyDisk", () => {
+    it("declares a never-commit intent only when asked to", async () => {
+      const getStickyDisk = vi.fn().mockResolvedValue({});
+      vi.mocked(reporter.createBlacksmithAgentClient).mockReturnValue({
+        up: vi.fn().mockResolvedValue({}),
+        getStickyDisk,
+      } as unknown as ReturnType<typeof reporter.createBlacksmithAgentClient>);
+
+      await setupBuilder.getStickyDisk();
+      expect(getStickyDisk.mock.calls[0][0]).not.toHaveProperty("commitIntent");
+
+      await setupBuilder.getStickyDisk({ commitIntent: CommitIntent.NEVER });
+      expect(getStickyDisk.mock.calls[1][0].commitIntent).toBe(
+        CommitIntent.NEVER,
+      );
+    });
+  });
 
   describe("writeDockerContainerBuildkitdTomlFile", () => {
     it("writes a docker-container BuildKit config with the Docker mirror", async () => {

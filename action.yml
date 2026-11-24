@@ -6,9 +6,12 @@ branding:
   color: black
 inputs:
   buildx-version:
-    description: Buildx version. (e.g., v0.23.0, latest)
+    description: Buildx version. (e.g., v0.39.1, latest)
     required: false
-    default: v0.23.0
+    default: v0.39.1
+  buildx-sha256:
+    description: "Expected SHA-256 of the buildx release binary for this runner's architecture. Defaults to the pinned digest for known versions, then the digest GitHub publishes for the release asset"
+    required: false
   platforms:
     description: "List of target platforms for build (e.g., linux/amd64,linux/arm64,linux/arm/v7)"
     required: false
@@ -20,7 +23,10 @@ inputs:
     description: "GitHub token for GitHub API access"
     required: false
   buildkit-version:
-    description: "BuildKit version to install (e.g., v0.16.0, v0.18.0). If not specified, uses system default"
+    description: "BuildKit version to install (e.g., v0.35.1). If not specified, uses system default"
+    required: false
+  buildkit-sha256:
+    description: "Expected SHA-256 of the BuildKit release archive for this runner's architecture. Defaults to the pinned digest for known versions, then the digest GitHub publishes for the release asset"
     required: false
   skip-integrity-check:
     description: "If true, skip the bbolt database integrity check"
@@ -32,6 +38,10 @@ inputs:
   max-parallelism:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
+  commit-cache:
+    description: "If false, never commit this job's changes to the sticky-disk build cache: the job reads the existing cache and its writes are discarded. Use it for untrusted builds (such as pull requests from forks or merge queue runs) and read-only cache consumers. Only the step that starts the builder applies it"
+    required: false
+    default: "true"
   max-cache-size-mb:
     description: "Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped."
     required: false
