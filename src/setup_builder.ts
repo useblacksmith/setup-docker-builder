@@ -7,11 +7,25 @@ import * as reporter from "./reporter";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
+import type { BuilderInfo } from "@docker/actions-toolkit/lib/types/buildx/builder";
 
 // Constants for configuration.
-const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
+export const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
+
+/**
+ * True when `builder` is the remote builder this action creates for the
+ * sticky-disk buildkitd, as opposed to a docker or docker-container one.
+ */
+export function isStickyDiskBuilder(
+  builder: Pick<BuilderInfo, "driver" | "nodes"> | undefined,
+): boolean {
+  return (
+    builder?.driver === "remote" &&
+    builder.nodes.some((node) => node.endpoint === BUILDKIT_DAEMON_ADDR)
+  );
+}
 
 // Tailscale functions removed - not needed for setup-docker-builder
 // Multi-platform builds are handled differently in the new architecture

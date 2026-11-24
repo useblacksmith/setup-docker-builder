@@ -3,47 +3,43 @@ import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
 import { exec } from "child_process";
-import axios from "axios";
+import { downloadVerifiedAsset, linuxArch } from "./release-assets";
 
 const execAsync = promisify(exec);
 
 /**
  * Downloads and installs a specific version of BuildKit
- * @param version The BuildKit version to install (e.g., "v0.16.0", "v0.18.0")
+ * @param version The BuildKit version to install (e.g., "v0.35.1")
+ * @param sha256 Expected SHA-256 of the release archive; empty to use the
+ *   pinned or published digest
+ * @param githubToken Optional token for reading the published digest
  * @returns The path to the installed buildkitd binary
  */
-export async function installBuildKit(version: string): Promise<string> {
+export async function installBuildKit(
+  version: string,
+  sha256 = "",
+  githubToken?: string,
+): Promise<string> {
   try {
     core.info(`Installing BuildKit ${version}`);
-
-    // Detect system architecture
-    const archResult = await execAsync("uname -m");
-    const arch = archResult.stdout.trim() === "aarch64" ? "arm64" : "amd64";
+    const arch = linuxArch();
 
     // Create temp directory
     const tmpDir = `/tmp/buildkit-${Date.now()}`;
     await fs.promises.mkdir(tmpDir, { recursive: true });
 
     try {
-      // Construct download URL
-      const downloadUrl = `https://github.com/moby/buildkit/releases/download/${version}/buildkit-${version}.linux-${arch}.tar.gz`;
-      core.info(`Downloading BuildKit from: ${downloadUrl}`);
-
-      // Download the archive
       const archivePath = path.join(tmpDir, "buildkit.tar.gz");
-      const response = await axios.get(downloadUrl, {
-        responseType: "stream",
-        timeout: 60000, // 60 second timeout
-      });
-
-      // Save to file
-      const writer = fs.createWriteStream(archivePath);
-      response.data.pipe(writer);
-
-      await new Promise<void>((resolve, reject) => {
-        writer.on("finish", () => resolve());
-        writer.on("error", reject);
-      });
+      await downloadVerifiedAsset(
+        {
+          repo: "moby/buildkit",
+          tag: version,
+          name: `buildkit-${version}.linux-${arch}.tar.gz`,
+        },
+        archivePath,
+        sha256,
+        githubToken,
+      );
 
       core.info("Download complete, extracting...");
 

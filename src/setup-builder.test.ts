@@ -46,6 +46,31 @@ describe("parseFstrimTimeoutSecs", () => {
     expect(setupBuilder.parseFstrimMinExtentBytes(-1)).toBe(0);
   });
 });
+describe("isStickyDiskBuilder", () => {
+  it("accepts only the remote builder pointed at this action's buildkitd", () => {
+    const endpoint = setupBuilder.BUILDKIT_DAEMON_ADDR;
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "remote",
+        nodes: [{ endpoint }],
+      }),
+    ).toBe(true);
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "docker-container",
+        nodes: [{ endpoint: "unix:///var/run/docker.sock" }],
+      }),
+    ).toBe(false);
+    expect(
+      setupBuilder.isStickyDiskBuilder({
+        driver: "remote",
+        nodes: [{ endpoint: "tcp://10.0.0.2:1234" }],
+      }),
+    ).toBe(false);
+    expect(setupBuilder.isStickyDiskBuilder(undefined)).toBe(false);
+  });
+});
+
 // import * as reporter from "./reporter";
 
 // Mock the modules
