@@ -75,8 +75,10 @@ This action follows semantic versioning and supports multiple referencing patter
 
 | Name                   | Description                                                                                                   | Required | Default        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
-| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                                        | No       | `v0.23.0`      |
-| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                                          | No       | System default |
+| `buildx-version`       | Buildx version (e.g., v0.39.1, latest)                                                                        | No       | `v0.39.1`      |
+| `buildx-sha256`        | Expected SHA-256 of the buildx binary. Defaults to the pinned digest, then the release's published digest     | No       |                |
+| `buildkit-version`     | BuildKit version to install (e.g., v0.35.1)                                                                   | No       | System default |
+| `buildkit-sha256`      | Expected SHA-256 of the BuildKit archive. Defaults to the pinned digest, then the release's published digest  | No       |                |
 | `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                            | No       |                |
 | `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                    | No       | `false`        |
 | `github-token`         | GitHub token for GitHub API access                                                                            | No       |                |
@@ -84,6 +86,8 @@ This action follows semantic versioning and supports multiple referencing patter
 | `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
 | `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
+| `commit-cache`         | If false, never commit this job's changes to the build cache; the job reads the cache and discards its writes | No       | `true`         |
+| `cache-mode`           | `read-only` attaches the cache behind a local copy-on-write snapshot so the cache disk is never written       | No       | `read-write`   |
 
 ## Example Workflows
 
@@ -140,6 +144,24 @@ Caveats:
   with:
     push: true
     tags: user/app:latest
+```
+
+### Read-only cache for untrusted builds
+
+Set `commit-cache: false` to let a job read the existing build cache without ever committing its changes back, for example for pull requests from forks or merge queue runs. Only trusted runs, such as pushes to the default branch, then update the cache.
+
+```yaml
+- uses: useblacksmith/setup-docker-builder@v1
+  with:
+    commit-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+```
+
+With `commit-cache: false` the job still writes to its own copy of the cache disk; those writes are discarded at the end of the job. `cache-mode: read-only` goes further: the cache disk is attached behind a device-mapper copy-on-write snapshot whose writes land in a sparse file on the runner's local disk, so the cache disk itself is never written. It implies `commit-cache: false` and needs `dmsetup`, `losetup` and the `dm-snapshot` kernel module on the runner. The local disk must have room for everything the build writes.
+
+```yaml
+- uses: useblacksmith/setup-docker-builder@v1
+  with:
+    cache-mode: read-only
 ```
 
 ### Custom Docker commands

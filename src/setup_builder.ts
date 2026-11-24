@@ -7,11 +7,27 @@ import * as reporter from "./reporter";
 import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
+import type { BuilderInfo } from "@docker/actions-toolkit/lib/types/buildx/builder";
+import { CommitIntent } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+import { attachCopyOnWrite } from "./readonly-mount";
 
 // Constants for configuration.
-const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
+export const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
+
+/**
+ * True when `builder` is the remote builder this action creates for the
+ * sticky-disk buildkitd, as opposed to a docker or docker-container one.
+ */
+export function isStickyDiskBuilder(
+  builder: Pick<BuilderInfo, "driver" | "nodes"> | undefined,
+): boolean {
+  return (
+    builder?.driver === "remote" &&
+    builder.nodes.some((node) => node.endpoint === BUILDKIT_DAEMON_ADDR)
+  );
+}
 
 // Tailscale functions removed - not needed for setup-docker-builder
 // Multi-platform builds are handled differently in the new architecture
@@ -435,6 +451,9 @@ export function parseFstrimMinExtentBytes(value: unknown): number {
 
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
+  // Declares at mount time that this job will never commit, so the host can
+  // treat it as a read-only consumer. Omitted (unspecified) otherwise.
+  commitIntent?: CommitIntent;
 }): Promise<{
   expose_id: string;
   device: string;
@@ -475,6 +494,7 @@ export async function getStickyDisk(options?: {
       stickyDiskType: "dockerfile",
       repoName: process.env.GITHUB_REPO_NAME || "",
       stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
+      ...(options?.commitIntent ? { commitIntent: options.commitIntent } : {}),
     },
     {
       signal: options?.signal,
@@ -726,7 +746,11 @@ const stickyDiskTimeoutMs = 45000;
 
 // setupStickyDisk mounts a sticky disk for the entity and returns the device information.
 // throws an error if it is unable to do so because of a timeout or an error
-export async function setupStickyDisk(): Promise<{
+export async function setupStickyDisk(
+  options: { commitCache: boolean; readOnly?: boolean } = {
+    commitCache: true,
+  },
+): Promise<{
   device: string;
   exposeId: string;
   commitEarlyDenyReason: string;
@@ -741,6 +765,7 @@ export async function setupStickyDisk(): Promise<{
 
     const stickyDiskResponse = await getStickyDisk({
       signal: controller.signal,
+      commitIntent: options.commitCache ? undefined : CommitIntent.NEVER,
     });
     const exposeId = stickyDiskResponse.expose_id;
     const device = stickyDiskResponse.device;
@@ -753,7 +778,11 @@ export async function setupStickyDisk(): Promise<{
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
-    if (commitEarlyDenyReason !== "") {
+    if (!options.commitCache) {
+      core.info(
+        "commit-cache is false: the build cache is used as-is and any changes to it are discarded.",
+      );
+    } else if (commitEarlyDenyReason !== "") {
       core.notice(
         `Sticky disk changes will not be committed for this job (${commitEarlyDenyReason}). The build cache is used as-is and any changes to it are discarded.`,
       );
@@ -764,13 +793,22 @@ export async function setupStickyDisk(): Promise<{
     }
     clearTimeout(timeoutId);
     await waitForNonZeroDeviceSize(device, 10000);
-    await maybeFormatBlockDevice(device);
+
+    // In read-only mode every write, including mkfs and resize2fs, goes to
+    // the copy-on-write snapshot instead of the sticky disk.
+    let mountDevice = device;
+    if (options.readOnly) {
+      const overlay = await attachCopyOnWrite(device);
+      stateHelper.setCopyOnWriteOverlay(overlay);
+      mountDevice = overlay.device;
+    }
+    await maybeFormatBlockDevice(mountDevice);
 
     await execAsync(`sudo mkdir -p ${mountPoint}`);
     // noinit_itable stops the background zeroing of a non-trivial portion of
     // the device (uninitialized inode tables), which is unnecessary here.
-    await execAsync(`sudo mount -o noinit_itable ${device} ${mountPoint}`);
-    core.debug(`${device} has been mounted to ${mountPoint}`);
+    await execAsync(`sudo mount -o noinit_itable ${mountDevice} ${mountPoint}`);
+    core.debug(`${mountDevice} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
 
     await discardPersistedHostResolvConf();

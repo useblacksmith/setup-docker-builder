@@ -28,17 +28,24 @@ import {
   logDatabaseHashes,
   writeDockerContainerBuildkitdTomlFile,
   fstrimFailureOutcome,
+  isStickyDiskBuilder,
 } from "./setup_builder";
 import {
   installBuildKit,
   isBuildKitVersionInstalled,
 } from "./buildkit-installer";
 import { shutdownBuildkitd } from "./shutdown";
+import { CacheMode, detachCopyOnWrite, parseCacheMode } from "./readonly-mount";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
+import {
+  downloadVerifiedAsset,
+  linuxArch,
+  resolveReleaseTag,
+} from "./release-assets";
 import { Metric_MetricType } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
-const DEFAULT_BUILDX_VERSION = "v0.23.0";
+const DEFAULT_BUILDX_VERSION = "v0.39.1";
 const mountPoint = "/var/lib/buildkit";
 const execAsync = promisify(exec);
 
@@ -343,12 +350,16 @@ async function checkBoltDbIntegrity(skip = false): Promise<boolean> {
 export interface Inputs {
   "buildx-version": string;
   "buildkit-version": string;
+  "buildx-sha256": string;
+  "buildkit-sha256": string;
   platforms: string[];
   nofallback: boolean;
   "github-token": string;
   "skip-integrity-check": boolean;
   "driver-opts": string[];
   "max-parallelism": number | null;
+  "commit-cache": boolean;
+  "cache-mode": CacheMode;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -365,9 +376,14 @@ async function getInputs(): Promise<Inputs> {
     }
   }
 
+  // A read-only cache can never be committed.
+  const readOnly = parseCacheMode(core.getInput("cache-mode")) === "read-only";
+
   return {
     "buildx-version": core.getInput("buildx-version"),
     "buildkit-version": core.getInput("buildkit-version"),
+    "buildx-sha256": core.getInput("buildx-sha256"),
+    "buildkit-sha256": core.getInput("buildkit-sha256"),
     platforms: Util.getInputList("platforms"),
     nofallback: core.getBooleanInput("nofallback"),
     "github-token": core.getInput("github-token"),
@@ -377,6 +393,8 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
+    "commit-cache": core.getBooleanInput("commit-cache") && !readOnly,
+    "cache-mode": readOnly ? "read-only" : "read-write",
   };
 }
 
@@ -408,7 +426,35 @@ async function retryWithBackoff<T>(
   throw lastError;
 }
 
-async function setupBuildx(version: string, toolkit: Toolkit): Promise<void> {
+// Downloads the official buildx release binary and verifies its SHA-256.
+// `latest` is resolved through the GitHub releases API rather than a
+// release index on a moving branch.
+async function downloadBuildx(
+  version: string,
+  sha256: string,
+  githubToken: string,
+): Promise<string> {
+  const tag = await resolveReleaseTag("docker/buildx", version, githubToken);
+  const dir = await fs.promises.mkdtemp(`${Context.tmpDir()}/buildx-`);
+  const binPath = `${dir}/docker-buildx`;
+  await downloadVerifiedAsset(
+    {
+      repo: "docker/buildx",
+      tag,
+      name: `buildx-${tag}.linux-${linuxArch()}`,
+    },
+    binPath,
+    sha256,
+    githubToken,
+  );
+  return binPath;
+}
+
+async function setupBuildx(
+  version: string,
+  toolkit: Toolkit,
+  inputs: Inputs,
+): Promise<void> {
   let toolPath: string | undefined;
   const standalone = await toolkit.buildx.isStandalone();
 
@@ -432,7 +478,11 @@ async function setupBuildx(version: string, toolkit: Toolkit): Promise<void> {
   if (!(await toolkit.buildx.isAvailable()) || version) {
     await core.group(`Download buildx from GitHub Releases`, async () => {
       toolPath = await retryWithBackoff(() =>
-        toolkit.buildxInstall.download(version || "latest", true),
+        downloadBuildx(
+          version || "latest",
+          inputs["buildx-sha256"],
+          inputs["github-token"],
+        ),
       );
     });
   }
@@ -458,11 +508,12 @@ function isValidBuildxVersion(version: string): boolean {
 
 /**
  * Starts and configures the Blacksmith builder
- * Returns the buildkit address and expose ID for the sticky disk
+ * Returns the buildkit address and expose ID for the sticky disk, and
+ * whether an already running buildkitd was reused
  */
 async function startBlacksmithBuilder(
   inputs: Inputs,
-): Promise<{ addr: string | null; exposeId: string }> {
+): Promise<{ addr: string | null; exposeId: string; reused?: boolean }> {
   try {
     // If buildkitd is already running, skip - the builder is already initialized.
     try {
@@ -473,7 +524,12 @@ async function startBlacksmithBuilder(
             `Skipping builder setup - builder is already initialized.`,
         );
         stateHelper.setReusedExistingBuilder(true);
-        return { addr: null, exposeId: "" };
+        if (!inputs["commit-cache"]) {
+          core.warning(
+            "commit-cache and cache-mode have no effect here: this step reuses a builder started by an earlier step, whose settings apply.",
+          );
+        }
+        return { addr: null, exposeId: "", reused: true };
       }
     } catch (error) {
       if ((error as { code?: number }).code !== 1) {
@@ -485,7 +541,10 @@ async function startBlacksmithBuilder(
 
     // Setup sticky disk
     const stickyDiskStartTime = Date.now();
-    const stickyDiskSetup = await setupStickyDisk();
+    const stickyDiskSetup = await setupStickyDisk({
+      commitCache: inputs["commit-cache"],
+      readOnly: inputs["cache-mode"] === "read-only",
+    });
     const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_HOTLOAD_DURATION_MS,
@@ -502,7 +561,11 @@ async function startBlacksmithBuilder(
 
       if (!isInstalled) {
         core.info(`Installing BuildKit ${version}...`);
-        buildkitdPath = await installBuildKit(version);
+        buildkitdPath = await installBuildKit(
+          version,
+          inputs["buildkit-sha256"],
+          inputs["github-token"],
+        );
       } else {
         core.info(`Using existing BuildKit ${version}`);
         // Use the installed version from /usr/local/bin
@@ -586,7 +649,7 @@ function removeTmpDir(): void {
  * instance starts buildkitd; subsequent instances reuse it and
  * should not shut it down.
  */
-async function maybeShutdownBuildkitd(): Promise<void> {
+async function maybeShutdownBuildkitd(commitCache: boolean): Promise<void> {
   const buildkitdAddr = stateHelper.getBuildkitdAddr();
   if (!buildkitdAddr) {
     core.info("This instance did not start buildkitd, skipping shutdown");
@@ -621,7 +684,9 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   try {
     const keepStorageInput = core.getInput("max-cache-size-mb");
-    if (!keepStorageInput) {
+    if (!commitCache) {
+      core.info("Skipping BuildKit cache pruning (commit-cache is false)");
+    } else if (!keepStorageInput) {
       core.info("Skipping BuildKit cache pruning (max-cache-size-mb not set)");
     } else {
       const keepStorageMB = parseInt(keepStorageInput, 10);
@@ -701,7 +766,7 @@ void actionsToolkit.run(
 
     // Setup buildx
     await core.group(`Setup buildx`, async () => {
-      await setupBuildx(buildxVersion, toolkit);
+      await setupBuildx(buildxVersion, toolkit, inputs);
 
       if (!(await toolkit.buildx.isAvailable())) {
         core.setFailed(
@@ -712,7 +777,11 @@ void actionsToolkit.run(
     });
 
     // Start Blacksmith builder
-    let builderInfo: { addr: string | null; exposeId: string } = {
+    let builderInfo: {
+      addr: string | null;
+      exposeId: string;
+      reused?: boolean;
+    } = {
       addr: null,
       exposeId: "",
     };
@@ -779,6 +848,19 @@ void actionsToolkit.run(
       await core.group(`Checking for configured builder`, async () => {
         try {
           const builder = await toolkit.builder.inspect();
+          // A running buildkitd is not proof that the current builder is the
+          // sticky-disk one: an earlier step may have fallen back to a local
+          // docker-container builder, whose buildkitd pgrep also sees.
+          if (
+            inputs.nofallback &&
+            builderInfo.reused &&
+            !isStickyDiskBuilder(builder)
+          ) {
+            core.setFailed(
+              `buildkitd is already running but the current builder (${builder?.name ?? "none"}, driver ${builder?.driver ?? "none"}) is not the sticky-disk builder. Failing because nofallback is set.`,
+            );
+            return;
+          }
           if (builder && builder.driver !== "docker") {
             core.info(
               `Found configured builder: ${builder.name} (driver: ${builder.driver})`,
@@ -827,6 +909,7 @@ void actionsToolkit.run(
       }
 
       const exposeId = stateHelper.getExposeId();
+      const commitCache = stateHelper.inputs?.["commit-cache"] ?? true;
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
       let integrityCheckPassed: boolean | null = null;
@@ -836,7 +919,7 @@ void actionsToolkit.run(
 
       try {
         // Step 1: Shut down buildkitd if this instance started it.
-        await maybeShutdownBuildkitd();
+        await maybeShutdownBuildkitd(commitCache);
 
         // Step 2: Sync and unmount sticky disk
         await execAsync("sync");
@@ -872,6 +955,7 @@ void actionsToolkit.run(
           const fstrimTimeoutSecs = stateHelper.getFstrimTimeoutSecs();
           if (
             fstrimTimeoutSecs > 0 &&
+            commitCache &&
             exposeId &&
             integrityCheckPassed &&
             !stateHelper.getCommitEarlyDenyReason() &&
@@ -939,9 +1023,14 @@ void actionsToolkit.run(
               }
             }
 
-            // Flush block device buffers after unmount to ensure data durability
-            // before the Ceph RBD snapshot is taken. The device is still mapped even though unmounted.
-            if (devicePath) {
+            // A read-only overlay never wrote to the sticky disk, so there is
+            // nothing to flush; drop the snapshot and its local writes.
+            const overlay = stateHelper.getCopyOnWriteOverlay();
+            if (overlay) {
+              await detachCopyOnWrite(overlay);
+            } else if (devicePath) {
+              // Flush block device buffers after unmount to ensure data durability
+              // before the Ceph RBD snapshot is taken. The device is still mapped even though unmounted.
               await flushBlockDevice(devicePath);
             } else {
               core.info(
@@ -979,7 +1068,11 @@ void actionsToolkit.run(
       // Step 4: Check for previous step failures before committing
       if (exposeId) {
         const commitEarlyDenyReason = stateHelper.getCommitEarlyDenyReason();
-        if (commitEarlyDenyReason) {
+        if (!commitCache) {
+          core.info(
+            "Skipping sticky disk commit: commit-cache is false; changes to the build cache are discarded",
+          );
+        } else if (commitEarlyDenyReason) {
           core.info(
             `Skipping sticky disk commit: denied for this job (${commitEarlyDenyReason}); changes to the build cache are discarded`,
           );
