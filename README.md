@@ -75,8 +75,10 @@ This action follows semantic versioning and supports multiple referencing patter
 
 | Name                   | Description                                                                                                   | Required | Default        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
-| `buildx-version`       | Buildx version (e.g., v0.23.0, latest)                                                                        | No       | `v0.23.0`      |
-| `buildkit-version`     | BuildKit version to install (e.g., v0.16.0, v0.18.0)                                                          | No       | System default |
+| `buildx-version`       | Buildx version (e.g., v0.39.1, latest)                                                                        | No       | `v0.39.1`      |
+| `buildx-sha256`        | Expected SHA-256 of the buildx binary. Defaults to the pinned digest, then the release's published digest     | No       |                |
+| `buildkit-version`     | BuildKit version to install (e.g., v0.35.1)                                                                   | No       | System default |
+| `buildkit-sha256`      | Expected SHA-256 of the BuildKit archive. Defaults to the pinned digest, then the release's published digest  | No       |                |
 | `platforms`            | List of target platforms for build (e.g., linux/amd64,linux/arm64)                                            | No       |                |
 | `nofallback`           | If true, fail the action if Blacksmith builder setup fails                                                    | No       | `false`        |
 | `github-token`         | GitHub token for GitHub API access                                                                            | No       |                |
