@@ -38,6 +38,10 @@ inputs:
   max-parallelism:
     description: "Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner."
     required: false
+  commit-cache:
+    description: "If false, never commit this job's changes to the sticky-disk build cache: the job reads the existing cache and its writes are discarded. Use it for untrusted builds (such as pull requests from forks or merge queue runs) and read-only cache consumers. Only the step that starts the builder applies it"
+    required: false
+    default: "true"
   max-cache-size-mb:
     description: "Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped."
     required: false

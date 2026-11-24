@@ -86,6 +86,7 @@ This action follows semantic versioning and supports multiple referencing patter
 | `driver-opts`          | List of additional driver-specific options (e.g., env.VARIABLE=value)                                         | No       |                |
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
 | `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
+| `commit-cache`         | If false, never commit this job's changes to the build cache; the job reads the cache and discards its writes | No       | `true`         |
 
 ## Example Workflows
 
@@ -142,6 +143,16 @@ Caveats:
   with:
     push: true
     tags: user/app:latest
+```
+
+### Read-only cache for untrusted builds
+
+Set `commit-cache: false` to let a job read the existing build cache without ever committing its changes back, for example for pull requests from forks or merge queue runs. Only trusted runs, such as pushes to the default branch, then update the cache.
+
+```yaml
+- uses: useblacksmith/setup-docker-builder@v1
+  with:
+    commit-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 ```
 
 ### Custom Docker commands

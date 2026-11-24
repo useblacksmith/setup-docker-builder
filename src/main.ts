@@ -357,6 +357,7 @@ export interface Inputs {
   "skip-integrity-check": boolean;
   "driver-opts": string[];
   "max-parallelism": number | null;
+  "commit-cache": boolean;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -387,6 +388,7 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
+    "commit-cache": core.getBooleanInput("commit-cache"),
   };
 }
 
@@ -516,6 +518,11 @@ async function startBlacksmithBuilder(
             `Skipping builder setup - builder is already initialized.`,
         );
         stateHelper.setReusedExistingBuilder(true);
+        if (!inputs["commit-cache"]) {
+          core.warning(
+            "commit-cache: false has no effect here: this step reuses a builder started by an earlier step, whose commit-cache setting applies.",
+          );
+        }
         return { addr: null, exposeId: "", reused: true };
       }
     } catch (error) {
@@ -528,7 +535,9 @@ async function startBlacksmithBuilder(
 
     // Setup sticky disk
     const stickyDiskStartTime = Date.now();
-    const stickyDiskSetup = await setupStickyDisk();
+    const stickyDiskSetup = await setupStickyDisk({
+      commitCache: inputs["commit-cache"],
+    });
     const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
     await reporter.reportMetric(
       Metric_MetricType.BPA_HOTLOAD_DURATION_MS,
@@ -633,7 +642,7 @@ function removeTmpDir(): void {
  * instance starts buildkitd; subsequent instances reuse it and
  * should not shut it down.
  */
-async function maybeShutdownBuildkitd(): Promise<void> {
+async function maybeShutdownBuildkitd(commitCache: boolean): Promise<void> {
   const buildkitdAddr = stateHelper.getBuildkitdAddr();
   if (!buildkitdAddr) {
     core.info("This instance did not start buildkitd, skipping shutdown");
@@ -668,7 +677,9 @@ async function maybeShutdownBuildkitd(): Promise<void> {
 
   try {
     const keepStorageInput = core.getInput("max-cache-size-mb");
-    if (!keepStorageInput) {
+    if (!commitCache) {
+      core.info("Skipping BuildKit cache pruning (commit-cache is false)");
+    } else if (!keepStorageInput) {
       core.info("Skipping BuildKit cache pruning (max-cache-size-mb not set)");
     } else {
       const keepStorageMB = parseInt(keepStorageInput, 10);
@@ -891,6 +902,7 @@ void actionsToolkit.run(
       }
 
       const exposeId = stateHelper.getExposeId();
+      const commitCache = stateHelper.inputs?.["commit-cache"] ?? true;
       let cleanupError: Error | null = null;
       let fsDiskUsageBytes: number | null = null;
       let integrityCheckPassed: boolean | null = null;
@@ -900,7 +912,7 @@ void actionsToolkit.run(
 
       try {
         // Step 1: Shut down buildkitd if this instance started it.
-        await maybeShutdownBuildkitd();
+        await maybeShutdownBuildkitd(commitCache);
 
         // Step 2: Sync and unmount sticky disk
         await execAsync("sync");
@@ -936,6 +948,7 @@ void actionsToolkit.run(
           const fstrimTimeoutSecs = stateHelper.getFstrimTimeoutSecs();
           if (
             fstrimTimeoutSecs > 0 &&
+            commitCache &&
             exposeId &&
             integrityCheckPassed &&
             !stateHelper.getCommitEarlyDenyReason() &&
@@ -1043,7 +1056,11 @@ void actionsToolkit.run(
       // Step 4: Check for previous step failures before committing
       if (exposeId) {
         const commitEarlyDenyReason = stateHelper.getCommitEarlyDenyReason();
-        if (commitEarlyDenyReason) {
+        if (!commitCache) {
+          core.info(
+            "Skipping sticky disk commit: commit-cache is false; changes to the build cache are discarded",
+          );
+        } else if (commitEarlyDenyReason) {
           core.info(
             `Skipping sticky disk commit: denied for this job (${commitEarlyDenyReason}); changes to the build cache are discarded`,
           );

@@ -8,6 +8,7 @@ import { execa } from "execa";
 import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
 import type { BuilderInfo } from "@docker/actions-toolkit/lib/types/buildx/builder";
+import { CommitIntent } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
 
 // Constants for configuration.
 export const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
@@ -449,6 +450,9 @@ export function parseFstrimMinExtentBytes(value: unknown): number {
 
 export async function getStickyDisk(options?: {
   signal?: AbortSignal;
+  // Declares at mount time that this job will never commit, so the host can
+  // treat it as a read-only consumer. Omitted (unspecified) otherwise.
+  commitIntent?: CommitIntent;
 }): Promise<{
   expose_id: string;
   device: string;
@@ -489,6 +493,7 @@ export async function getStickyDisk(options?: {
       stickyDiskType: "dockerfile",
       repoName: process.env.GITHUB_REPO_NAME || "",
       stickyDiskToken: process.env.BLACKSMITH_STICKYDISK_TOKEN || "",
+      ...(options?.commitIntent ? { commitIntent: options.commitIntent } : {}),
     },
     {
       signal: options?.signal,
@@ -740,7 +745,9 @@ const stickyDiskTimeoutMs = 45000;
 
 // setupStickyDisk mounts a sticky disk for the entity and returns the device information.
 // throws an error if it is unable to do so because of a timeout or an error
-export async function setupStickyDisk(): Promise<{
+export async function setupStickyDisk(
+  options: { commitCache: boolean } = { commitCache: true },
+): Promise<{
   device: string;
   exposeId: string;
   commitEarlyDenyReason: string;
@@ -755,6 +762,7 @@ export async function setupStickyDisk(): Promise<{
 
     const stickyDiskResponse = await getStickyDisk({
       signal: controller.signal,
+      commitIntent: options.commitCache ? undefined : CommitIntent.NEVER,
     });
     const exposeId = stickyDiskResponse.expose_id;
     const device = stickyDiskResponse.device;
@@ -767,7 +775,11 @@ export async function setupStickyDisk(): Promise<{
 
     core.info(`Sticky disk parent snapshot: ${parentSnapshotName}`);
     core.info(`Sticky disk clone name: ${cloneName}`);
-    if (commitEarlyDenyReason !== "") {
+    if (!options.commitCache) {
+      core.info(
+        "commit-cache is false: the build cache is used as-is and any changes to it are discarded.",
+      );
+    } else if (commitEarlyDenyReason !== "") {
       core.notice(
         `Sticky disk changes will not be committed for this job (${commitEarlyDenyReason}). The build cache is used as-is and any changes to it are discarded.`,
       );
