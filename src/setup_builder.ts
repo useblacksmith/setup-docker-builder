@@ -9,6 +9,7 @@ import * as stateHelper from "./state-helper";
 import { BOLT_CHECK_MAX_FILE_BYTES } from "./exec-utils";
 import type { BuilderInfo } from "@docker/actions-toolkit/lib/types/buildx/builder";
 import { CommitIntent } from "@buf/blacksmith_vm-agent.bufbuild_es/stickydisk/v1/stickydisk_pb.js";
+import { attachCopyOnWrite } from "./readonly-mount";
 
 // Constants for configuration.
 export const BUILDKIT_DAEMON_ADDR = "tcp://127.0.0.1:1234";
@@ -746,7 +747,9 @@ const stickyDiskTimeoutMs = 45000;
 // setupStickyDisk mounts a sticky disk for the entity and returns the device information.
 // throws an error if it is unable to do so because of a timeout or an error
 export async function setupStickyDisk(
-  options: { commitCache: boolean } = { commitCache: true },
+  options: { commitCache: boolean; readOnly?: boolean } = {
+    commitCache: true,
+  },
 ): Promise<{
   device: string;
   exposeId: string;
@@ -790,13 +793,22 @@ export async function setupStickyDisk(
     }
     clearTimeout(timeoutId);
     await waitForNonZeroDeviceSize(device, 10000);
-    await maybeFormatBlockDevice(device);
+
+    // In read-only mode every write, including mkfs and resize2fs, goes to
+    // the copy-on-write snapshot instead of the sticky disk.
+    let mountDevice = device;
+    if (options.readOnly) {
+      const overlay = await attachCopyOnWrite(device);
+      stateHelper.setCopyOnWriteOverlay(overlay);
+      mountDevice = overlay.device;
+    }
+    await maybeFormatBlockDevice(mountDevice);
 
     await execAsync(`sudo mkdir -p ${mountPoint}`);
     // noinit_itable stops the background zeroing of a non-trivial portion of
     // the device (uninitialized inode tables), which is unnecessary here.
-    await execAsync(`sudo mount -o noinit_itable ${device} ${mountPoint}`);
-    core.debug(`${device} has been mounted to ${mountPoint}`);
+    await execAsync(`sudo mount -o noinit_itable ${mountDevice} ${mountPoint}`);
+    core.debug(`${mountDevice} has been mounted to ${mountPoint}`);
     core.info("Successfully obtained sticky disk");
 
     await discardPersistedHostResolvConf();

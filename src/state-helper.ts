@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import type { CopyOnWriteOverlay } from "./readonly-mount";
 
 // State variables needed for setup-docker-builder
 export const tmpDir = process.env.STATE_tmpDir || "";
@@ -50,6 +51,17 @@ export function setFstrimMinExtentBytes(bytes: number) {
 export function getFstrimMinExtentBytes(): number {
   const n = Number(core.getState("fstrimMinExtentBytes") || "0");
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+// Set when the sticky disk was attached behind a read-only copy-on-write
+// snapshot (cache-mode: read-only); the post step removes it after unmount.
+export function setCopyOnWriteOverlay(overlay: CopyOnWriteOverlay) {
+  core.saveState("copyOnWriteOverlay", JSON.stringify(overlay));
+}
+
+export function getCopyOnWriteOverlay(): CopyOnWriteOverlay | undefined {
+  const raw = core.getState("copyOnWriteOverlay");
+  return raw ? (JSON.parse(raw) as CopyOnWriteOverlay) : undefined;
 }
 
 export function setBuildkitdAddr(addr: string) {

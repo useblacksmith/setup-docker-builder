@@ -87,6 +87,7 @@ This action follows semantic versioning and supports multiple referencing patter
 | `max-parallelism`      | Maximum number of concurrent BuildKit RUN steps. Defaults to the number of vCPUs on the runner                | No       |                |
 | `max-cache-size-mb`    | Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped | No       |                |
 | `commit-cache`         | If false, never commit this job's changes to the build cache; the job reads the cache and discards its writes | No       | `true`         |
+| `cache-mode`           | `read-only` attaches the cache behind a local copy-on-write snapshot so the cache disk is never written       | No       | `read-write`   |
 
 ## Example Workflows
 
@@ -153,6 +154,14 @@ Set `commit-cache: false` to let a job read the existing build cache without eve
 - uses: useblacksmith/setup-docker-builder@v1
   with:
     commit-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+```
+
+With `commit-cache: false` the job still writes to its own copy of the cache disk; those writes are discarded at the end of the job. `cache-mode: read-only` goes further: the cache disk is attached behind a device-mapper copy-on-write snapshot whose writes land in a sparse file on the runner's local disk, so the cache disk itself is never written. It implies `commit-cache: false` and needs `dmsetup`, `losetup` and the `dm-snapshot` kernel module on the runner. The local disk must have room for everything the build writes.
+
+```yaml
+- uses: useblacksmith/setup-docker-builder@v1
+  with:
+    cache-mode: read-only
 ```
 
 ### Custom Docker commands

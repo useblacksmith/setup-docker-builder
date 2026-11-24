@@ -35,6 +35,7 @@ import {
   isBuildKitVersionInstalled,
 } from "./buildkit-installer";
 import { shutdownBuildkitd } from "./shutdown";
+import { CacheMode, detachCopyOnWrite, parseCacheMode } from "./readonly-mount";
 import { resolveRemoteBuilderPlatforms } from "./platform-utils";
 import { checkPreviousStepFailures } from "./step-checker";
 import {
@@ -358,6 +359,7 @@ export interface Inputs {
   "driver-opts": string[];
   "max-parallelism": number | null;
   "commit-cache": boolean;
+  "cache-mode": CacheMode;
 }
 
 async function getInputs(): Promise<Inputs> {
@@ -374,6 +376,9 @@ async function getInputs(): Promise<Inputs> {
     }
   }
 
+  // A read-only cache can never be committed.
+  const readOnly = parseCacheMode(core.getInput("cache-mode")) === "read-only";
+
   return {
     "buildx-version": core.getInput("buildx-version"),
     "buildkit-version": core.getInput("buildkit-version"),
@@ -388,7 +393,8 @@ async function getInputs(): Promise<Inputs> {
       quote: false,
     }),
     "max-parallelism": maxParallelism,
-    "commit-cache": core.getBooleanInput("commit-cache"),
+    "commit-cache": core.getBooleanInput("commit-cache") && !readOnly,
+    "cache-mode": readOnly ? "read-only" : "read-write",
   };
 }
 
@@ -520,7 +526,7 @@ async function startBlacksmithBuilder(
         stateHelper.setReusedExistingBuilder(true);
         if (!inputs["commit-cache"]) {
           core.warning(
-            "commit-cache: false has no effect here: this step reuses a builder started by an earlier step, whose commit-cache setting applies.",
+            "commit-cache and cache-mode have no effect here: this step reuses a builder started by an earlier step, whose settings apply.",
           );
         }
         return { addr: null, exposeId: "", reused: true };
@@ -537,6 +543,7 @@ async function startBlacksmithBuilder(
     const stickyDiskStartTime = Date.now();
     const stickyDiskSetup = await setupStickyDisk({
       commitCache: inputs["commit-cache"],
+      readOnly: inputs["cache-mode"] === "read-only",
     });
     const stickyDiskDurationMs = Date.now() - stickyDiskStartTime;
     await reporter.reportMetric(
@@ -1016,9 +1023,14 @@ void actionsToolkit.run(
               }
             }
 
-            // Flush block device buffers after unmount to ensure data durability
-            // before the Ceph RBD snapshot is taken. The device is still mapped even though unmounted.
-            if (devicePath) {
+            // A read-only overlay never wrote to the sticky disk, so there is
+            // nothing to flush; drop the snapshot and its local writes.
+            const overlay = stateHelper.getCopyOnWriteOverlay();
+            if (overlay) {
+              await detachCopyOnWrite(overlay);
+            } else if (devicePath) {
+              // Flush block device buffers after unmount to ensure data durability
+              // before the Ceph RBD snapshot is taken. The device is still mapped even though unmounted.
               await flushBlockDevice(devicePath);
             } else {
               core.info(

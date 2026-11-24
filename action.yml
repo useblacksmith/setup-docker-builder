@@ -42,6 +42,10 @@ inputs:
     description: "If false, never commit this job's changes to the sticky-disk build cache: the job reads the existing cache and its writes are discarded. Use it for untrusted builds (such as pull requests from forks or merge queue runs) and read-only cache consumers. Only the step that starts the builder applies it"
     required: false
     default: "true"
+  cache-mode:
+    description: "read-write (default) or read-only. read-only attaches the sticky-disk cache behind a copy-on-write snapshot on the runner's local disk, so the job reads the cache but never writes to the cache disk, and implies commit-cache: false. Needs dmsetup, losetup and the dm-snapshot kernel module on the runner"
+    required: false
+    default: read-write
   max-cache-size-mb:
     description: "Amount of build cache to retain after pruning, in MB (e.g., 409600 for 400GB). If not set, pruning is skipped."
     required: false
